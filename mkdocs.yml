@@ -1,0 +1,34 @@
+site_name: AutoMap
+site_description: KSP annotation processor for Kotlin class mappers
+site_url: https://ch000se.github.io/auto-map
+repo_url: https://github.com/ch000se/auto-map
+repo_name: ch000se/auto-map
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Usage Guide: usage.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/romychab/hilt-autobind/main/lib-compiler/src/test/kotlin/com/uandcode/hilt/autobind/compiler/CompilationTestHelper.kt\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/romychab/hilt-autobind/main/lib-compiler/src/test/kotlin/com/uandcode/hilt/autobind/compiler/DefaultBindingTest.kt\")",
+      "WebSearch",
+      "WebFetch(domain:square.github.io)"
+    ]
+  }
+}
