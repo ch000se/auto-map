@@ -19,6 +19,42 @@ class PublishingConventionPlugin : Plugin<Project> {
                 if (findProperty("signingInMemoryKey") != null) {
                     signAllPublications()
                 }
+
+                val artifactName = project.name.replace("lib-", "automap-")
+
+                coordinates(
+                    groupId = project.findProperty("GROUP")?.toString() ?: "io.github.ch000se",
+                    artifactId = artifactName,
+                    version = project.findProperty("VERSION_NAME")?.toString() ?: "0.1.0"
+                )
+
+                pom {
+                    name.set(artifactName)
+                    description.set(project.findProperty("POM_DESCRIPTION")?.toString())
+                    inceptionYear.set(project.findProperty("POM_INCEPTION_YEAR")?.toString())
+                    url.set(project.findProperty("POM_URL")?.toString())
+
+                    licenses {
+                        license {
+                            name.set(project.findProperty("POM_LICENSE_NAME")?.toString())
+                            url.set(project.findProperty("POM_LICENSE_URL")?.toString())
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id.set(project.findProperty("POM_DEVELOPER_ID")?.toString())
+                            name.set(project.findProperty("POM_DEVELOPER_NAME")?.toString())
+                            email.set(project.findProperty("POM_DEVELOPER_EMAIL")?.toString())
+                        }
+                    }
+
+                    scm {
+                        connection.set(project.findProperty("POM_SCM_CONNECTION")?.toString())
+                        developerConnection.set(project.findProperty("POM_SCM_DEV_CONNECTION")?.toString())
+                        url.set(project.findProperty("POM_SCM_URL")?.toString())
+                    }
+                }
             }
 
             extensions.configure<PublishingExtension> {

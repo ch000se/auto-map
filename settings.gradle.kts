@@ -30,20 +30,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "automap"
 
-val publicProps = java.util.Properties().apply {
-    val file = rootDir.resolve("gradle-public.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
-}
-
-val currentProjectProps = gradle.startParameter.projectProperties.toMutableMap()
-publicProps.forEach { (k, v) ->
-    val key = k.toString()
-    if (!currentProjectProps.containsKey(key)) {
-        currentProjectProps[key] = v.toString()
-    }
-}
-gradle.startParameter.projectProperties = currentProjectProps
-
 include(":lib-core")
 include(":lib-compiler")
 include(":app-example")
