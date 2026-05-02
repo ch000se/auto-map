@@ -25,7 +25,7 @@ class PublishingConventionPlugin : Plugin<Project> {
                 coordinates(
                     groupId = project.findProperty("GROUP")?.toString() ?: "io.github.ch000se",
                     artifactId = artifactName,
-                    version = project.findProperty("VERSION_NAME")?.toString() ?: "0.1.0"
+                    version = project.findProperty("VERSION_NAME")?.toString() ?: "0.1.1"
                 )
 
                 pom {

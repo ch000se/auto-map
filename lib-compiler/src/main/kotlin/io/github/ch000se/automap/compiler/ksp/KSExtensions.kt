@@ -33,7 +33,7 @@ internal fun KSClassDeclaration.companionInvokeFunction(): KSFunctionDeclaration
  *
  * Prefers the primary constructor when it is publicly accessible. Falls back to a companion
  * `operator fun invoke(...)` when the primary constructor is absent or private/protected
- * (builder-style classes)
+ * (builder-style classes).
  */
 internal fun KSClassDeclaration.resolvedParams(): List<KSValueParameter>? {
     val ctor = primaryConstructor
