@@ -122,11 +122,18 @@ Stale KSP caches are a common cause of spurious build failures.
 
 ## Requirements
 
-| Dependency | Minimum version |
-|------------|-----------------|
-| Kotlin     | 2.0+            |
-| KSP        | 2.0+            |
-| JDK        | 17+             |
+| Dependency       | Minimum version | Notes                                                                                |
+|------------------|-----------------|--------------------------------------------------------------------------------------|
+| Kotlin           | 2.0+            | Tested up to 2.3                                                                     |
+| KSP              | 2.0+            | Use the version that matches your Kotlin version                                     |
+| JDK (build)      | 17+             | Required to **run** the KSP processor (the Gradle daemon JDK)                        |
+| JVM (runtime)    | 11+             | Library bytecode targets JVM 11 — works on JDK 11 and any modern Android device      |
+| Android minSdk   | any             | The library has **no Android dependencies** — pure JVM, usable in any Android module |
+| Multiplatform    | JVM target      | Works in any Kotlin Multiplatform module that has a JVM source set                   |
+
+> **Tip:** the only constraint that affects most users is the **build JDK** — if your
+> Gradle daemon already runs on JDK 17 (default for AGP 8+ and modern Kotlin), you're
+> ready to go without any other version bumps.
 
 ## License
 

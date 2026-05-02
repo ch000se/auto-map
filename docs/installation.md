@@ -95,8 +95,15 @@ If nothing is generated, double-check that:
 
 ## Version Compatibility
 
-| Dependency | Minimum version |
-|------------|-----------------|
-| Kotlin     | 2.0+            |
-| KSP        | 2.0+            |
-| JDK        | 17+             |
+| Dependency       | Minimum version | Notes                                                                                |
+|------------------|-----------------|--------------------------------------------------------------------------------------|
+| Kotlin           | 2.0+            | Tested up to 2.3                                                                     |
+| KSP              | 2.0+            | Use the version that matches your Kotlin version                                     |
+| JDK (build)      | 17+             | Required to run the KSP processor                                                    |
+| JVM (runtime)    | 11+             | Library bytecode targets JVM 11 — works on JDK 11 and any modern Android device      |
+| Android minSdk   | any             | No Android dependencies — usable in any Android module                               |
+| Multiplatform    | JVM target      | Works in any KMP module with a JVM source set                                        |
+
+The only constraint that matters for most users is the **build JDK**. If your Gradle
+daemon already runs on JDK 17 (default for AGP 8+ and modern Kotlin), no version
+bumps are needed.
