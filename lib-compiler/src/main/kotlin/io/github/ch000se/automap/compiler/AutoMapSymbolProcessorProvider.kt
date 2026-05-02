@@ -13,7 +13,7 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
  * generates the corresponding mapper sources.
  *
  * Consumers normally do not reference this class directly by adding the `lib-compiler` artifact
- * with `ksp(...)` in Gradle is sufficient for KSP to discover it.
+ * with `ksp(...)` in Gradle is sufficient for KSP to discover it
  */
 public class AutoMapSymbolProcessorProvider : SymbolProcessorProvider {
     /**
