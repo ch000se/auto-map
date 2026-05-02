@@ -36,6 +36,32 @@ jobs:
       - name: Run tests
         run: ./gradlew :lib-core:test :lib-compiler:test
 
+      - name: Verify publish secrets are present
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          missing=0
+          check() {
+            local val="${!1}"
+            if [ -z "$val" ]; then
+              echo "::error::Secret $1 is missing or empty"
+              missing=1
+            else
+              echo "OK $1 — length=${#val}"
+            fi
+          }
+          check MAVEN_CENTRAL_USERNAME
+          check MAVEN_CENTRAL_PASSWORD
+          check SIGNING_KEY_ID
+          check SIGNING_KEY_PASSWORD
+          check SIGNING_KEY
+          if [ "$missing" = "1" ]; then exit 1; fi
+          echo "SIGNING_KEY first 36 chars: $(printf '%s' "$SIGNING_KEY" | head -c 36)"
+
       - name: Publish to Maven Central
         run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
         env:
