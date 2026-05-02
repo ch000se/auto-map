@@ -34,13 +34,15 @@ val publicProps = java.util.Properties().apply {
     val file = rootDir.resolve("gradle-public.properties")
     if (file.exists()) file.inputStream().use { load(it) }
 }
-gradle.beforeProject {
-    publicProps.forEach { (k, v) ->
-        if (!project.hasProperty(k.toString())) {
-            project.extensions.extraProperties[k.toString()] = v.toString()
-        }
+
+val currentProjectProps = gradle.startParameter.projectProperties.toMutableMap()
+publicProps.forEach { (k, v) ->
+    val key = k.toString()
+    if (!currentProjectProps.containsKey(key)) {
+        currentProjectProps[key] = v.toString()
     }
 }
+gradle.startParameter.projectProperties = currentProjectProps
 
 include(":lib-core")
 include(":lib-compiler")

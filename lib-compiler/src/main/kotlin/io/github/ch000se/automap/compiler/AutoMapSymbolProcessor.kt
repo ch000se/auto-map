@@ -44,7 +44,7 @@ internal class AutoMapSymbolProcessor(
 
         // Require an accessible primary constructor (with at least one parameter) or a companion
         // operator invoke factory on the target. An empty no-arg primary constructor cannot be
-        // used for mapping because there is no way to populate the target's properties
+        // used for mapping because there is no way to populate the target's properties.
         val targetParams = targetClass.resolvedParams()
         if (targetParams.isNullOrEmpty()) {
             logger.error(
