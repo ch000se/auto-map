@@ -16,7 +16,6 @@ import io.github.ch000se.automap.compiler.ksp.resolvedParams
 import com.squareup.kotlinpoet.ksp.addOriginatingKSFile
 import com.squareup.kotlinpoet.ksp.toClassName
 
-// KotlinPoet 2.x uses Unicode single-char markers instead of %> / %<
 private const val INDENT = "⇥"   // U+21E5
 private const val UNINDENT = "⇤" // U+21E4
 
