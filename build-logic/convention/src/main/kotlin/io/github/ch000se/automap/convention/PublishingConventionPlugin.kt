@@ -7,6 +7,7 @@ import org.gradle.api.publish.PublishingExtension
 import org.gradle.kotlin.dsl.configure
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.parameters.VisibilityModifier
+import java.util.Properties
 
 class PublishingConventionPlugin : Plugin<Project> {
 
@@ -15,8 +16,19 @@ class PublishingConventionPlugin : Plugin<Project> {
         pluginManager.apply("com.vanniktech.maven.publish")
         pluginManager.apply("org.jetbrains.dokka")
 
-        fun gp(name: String): String =
-            providers.gradleProperty(name).get()
+        val publicProps = Properties().apply {
+            val file = rootProject.file("gradle-public.properties")
+            if (file.exists()) {
+                file.inputStream().use { load(it) }
+            }
+        }
+
+        fun gp(name: String, default: String? = null): String =
+            findProperty(name)?.toString()
+                ?: rootProject.findProperty(name)?.toString()
+                ?: publicProps.getProperty(name)
+                ?: default
+                ?: error("Missing property: $name")
 
         val artifactName = project.name.replace("lib-", "automap-")
 
@@ -37,7 +49,6 @@ class PublishingConventionPlugin : Plugin<Project> {
             pom {
 
                 name.set(artifactName)
-
                 description.set(
                     when (artifactName) {
                         "automap-core" ->
