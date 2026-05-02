@@ -1,34 +1,40 @@
 site_name: AutoMap
-site_description: KSP annotation processor for Kotlin class mappers
-site_url: https://ch000se.github.io/auto-map
+site_description: KSP annotation processor that generates type-safe mappers between Kotlin data classes
+site_url: https://ch000se.github.io/auto-map/
 repo_url: https://github.com/ch000se/auto-map
 repo_name: ch000se/auto-map
 
+docs_dir: build/mkdocs-src
+site_dir: build/mkdocs
+
 theme:
   name: material
+  features:
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
   palette:
-    - scheme: default
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  features:
-    - navigation.tabs
-    - content.code.copy
 
 nav:
   - Home: index.md
+  - Installation: installation.md
   - Usage Guide: usage.md
 
 markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.inlinehilite
   - pymdownx.superfences
-  - admonition

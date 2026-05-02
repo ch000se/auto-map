@@ -3,6 +3,7 @@ package io.github.ch000se.automap.convention
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.publish.PublishingExtension
 import org.gradle.kotlin.dsl.configure
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.parameters.VisibilityModifier
@@ -17,6 +18,15 @@ class PublishingConventionPlugin : Plugin<Project> {
                 publishToMavenCentral()
                 if (findProperty("signingInMemoryKey") != null) {
                     signAllPublications()
+                }
+            }
+
+            extensions.configure<PublishingExtension> {
+                repositories {
+                    maven {
+                        name = "LocalRepo"
+                        url = uri(rootProject.layout.buildDirectory.dir("repo"))
+                    }
                 }
             }
 
