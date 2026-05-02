@@ -47,6 +47,9 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Stage public publishing metadata
+        run: cp gradle-public.properties gradle.properties
+
       - name: Build and test library modules
         run: ./gradlew :lib-core:build :lib-compiler:build
 
@@ -70,6 +73,9 @@ jobs:
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
+
+      - name: Stage public publishing metadata
+        run: cp gradle-public.properties gradle.properties
 
       - name: Run Detekt
         run: ./gradlew detekt
