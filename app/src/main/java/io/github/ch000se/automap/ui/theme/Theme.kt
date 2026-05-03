@@ -1,6 +1,5 @@
 package io.github.ch000se.automap.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -33,12 +32,21 @@ private val LightColorScheme = lightColorScheme(
     */
 )
 
+/**
+ * Applies the sample application's Material 3 theme.
+ *
+ * @param darkTheme Whether dark colors should be used.
+ * @param dynamicColor Whether Android 12+ dynamic colors should override the static sample
+ *   palette.
+ * @param content Composable content rendered inside [MaterialTheme].
+ */
 @Composable
+@Suppress("FunctionName")
 fun AutoMapTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
@@ -53,6 +61,6 @@ fun AutoMapTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
-        content = content
+        content = content,
     )
 }

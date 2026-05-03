@@ -8,7 +8,18 @@ import org.gradle.kotlin.dsl.configure
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
+/**
+ * Gradle convention plugin that applies shared Kotlin/JVM library settings.
+ *
+ * Library modules use Java 11 bytecode, a Java 17 toolchain, explicit Kotlin API mode, and warnings
+ * as errors so published APIs stay intentional.
+ */
 class KotlinLibraryConventionPlugin : Plugin<Project> {
+    /**
+     * Applies Kotlin/JVM library defaults to [target].
+     *
+     * @param target Gradle project receiving this convention plugin.
+     */
     override fun apply(target: Project) {
         with(target) {
             pluginManager.apply("java-library")

@@ -1,109 +1,158 @@
 # Installation
 
-## Table of Contents
+AutoMap has two artifacts:
 
-- [Prerequisites](#prerequisites)
-- [Add AutoMap dependencies](#add-automap-dependencies)
-- [Verifying the setup](#verifying-the-setup)
-- [Version compatibility](#version-compatibility)
+- `automap-core` contains source-retained annotations used by your Kotlin code.
+- `automap-compiler` contains the KSP processor that generates mapper functions during
+  compilation.
 
-## Prerequisites
+Both artifacts must be added to every Gradle module that declares `@AutoMap` annotations.
 
-AutoMap requires [KSP (Kotlin Symbol Processing)](https://github.com/google/ksp)
-to be applied to any module that contains classes annotated with `@AutoMap`.
+## Requirements
 
-**1. Add the KSP plugin to your root `build.gradle.kts`:**
+| Dependency | Requirement |
+|------------|-------------|
+| Kotlin | A Kotlin version supported by the KSP plugin you use. |
+| KSP | The KSP plugin version matching your Kotlin compiler version. |
+| JDK | JDK 17 for builds. |
+| Android Gradle Plugin | A modern AGP version with KSP support for Android modules. |
 
-```kotlin
-plugins {
-    id("com.google.devtools.ksp") version "2.0.21-1.0.28" apply false
-}
-```
+The published library modules target Java 11 bytecode. The build itself should run on JDK 17.
 
-> Use a KSP version that matches your Kotlin version. See the
-> [KSP releases page](https://github.com/google/ksp/releases) for the mapping.
-
-**2. Apply the plugin in the consuming module's `build.gradle.kts`:**
+## Kotlin/JVM
 
 ```kotlin
 plugins {
-    kotlin("jvm")           // or kotlin("android")
-    id("com.google.devtools.ksp")
+    kotlin("jvm") version "<kotlin-version>"
+    id("com.google.devtools.ksp") version "<ksp-version>"
 }
-```
 
-For Android library/app modules, also add the generated sources to the source set
-(needed only on older AGP versions — modern AGP picks them up automatically):
-
-```kotlin
-android {
-    sourceSets["main"].kotlin.srcDir("build/generated/ksp/main/kotlin")
-}
-```
-
-## Add AutoMap Dependencies
-
-Add the runtime annotations and the KSP compiler to your module's `build.gradle.kts`:
-
-```kotlin
 dependencies {
-    implementation("io.github.ch000se:automap-core:0.1.0")
-    ksp("io.github.ch000se:automap-compiler:0.1.0")
+    implementation("io.github.ch000se:automap-core:<automap-version>")
+    ksp("io.github.ch000se:automap-compiler:<automap-version>")
 }
 ```
 
-> The `core` artifact only contains the `@AutoMap` annotation — there is no
-> runtime code. The `compiler` artifact must be applied via the `ksp(...)`
-> configuration, not `implementation(...)`.
+## Android
 
-### Using a version catalog
+```kotlin
+plugins {
+    id("com.android.application")
+    kotlin("android")
+    id("com.google.devtools.ksp") version "<ksp-version>"
+}
 
-If your project uses a Gradle version catalog (`gradle/libs.versions.toml`):
+dependencies {
+    implementation("io.github.ch000se:automap-core:<automap-version>")
+    ksp("io.github.ch000se:automap-compiler:<automap-version>")
+}
+```
+
+For Android library modules, use `com.android.library` instead of `com.android.application`.
+
+## Version Catalog
+
+If your project uses `gradle/libs.versions.toml`, keep AutoMap and KSP versions in the catalog:
 
 ```toml
 [versions]
-automap = "0.1.0"
+automap = "<automap-version>"
+ksp = "<ksp-version>"
 
 [libraries]
 automap-core = { module = "io.github.ch000se:automap-core", version.ref = "automap" }
 automap-compiler = { module = "io.github.ch000se:automap-compiler", version.ref = "automap" }
+
+[plugins]
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 ```
 
-Then reference them in `build.gradle.kts`:
+Then use the aliases in the consuming module:
 
 ```kotlin
+plugins {
+    alias(libs.plugins.ksp)
+}
+
 dependencies {
     implementation(libs.automap.core)
     ksp(libs.automap.compiler)
 }
 ```
 
-## Verifying the Setup
+## Version alignment
 
-After a successful build, generated mappers appear under:
+KSP versions are tied to Kotlin compiler versions. If your project upgrades Kotlin, upgrade KSP to
+the matching release as well. A mismatched KSP plugin usually fails before AutoMap runs.
 
+## Multi-module projects
+
+Configure AutoMap in the module that owns the annotated classes:
+
+```kotlin
+// data/build.gradle.kts
+dependencies {
+    implementation("io.github.ch000se:automap-core:<automap-version>")
+    ksp("io.github.ch000se:automap-compiler:<automap-version>")
+}
 ```
-build/generated/ksp/main/kotlin/<package>/<SourceName>To<TargetName>Mapper.kt
+
+Generated mapper functions are compiled into that module. Downstream modules can call them by
+depending on the module and importing the generated extension functions.
+
+Clean-architecture example:
+
+```text
+:domain
+  User
+
+:data
+  UserDto annotated with @AutoMap(source = User::class)
 ```
 
-If nothing is generated, double-check that:
+The domain module does not need to know about DTOs. The data module owns the mapping declaration and
+receives the generated `User.toUserDto()` extension function.
 
-1. The KSP plugin is applied to the same module that holds `@AutoMap`-annotated classes.
-2. The compiler artifact is applied via `ksp(...)`, not `implementation(...)`.
-3. The annotated class is reachable from the module being compiled.
-4. You ran a full build, not just a recompile of the file (`./gradlew build`).
+## Generated source location
 
-## Version Compatibility
+Generated files are written by KSP under:
 
-| Dependency       | Minimum version | Notes                                                                                |
-|------------------|-----------------|--------------------------------------------------------------------------------------|
-| Kotlin           | 2.0+            | Tested up to 2.3                                                                     |
-| KSP              | 2.0+            | Use the version that matches your Kotlin version                                     |
-| JDK (build)      | 17+             | Required to run the KSP processor                                                    |
-| JVM (runtime)    | 11+             | Library bytecode targets JVM 11 — works on JDK 11 and any modern Android device      |
-| Android minSdk   | any             | No Android dependencies — usable in any Android module                               |
-| Multiplatform    | JVM target      | Works in any KMP module with a JVM source set                                        |
+```text
+build/generated/ksp/<sourceSet>/kotlin
+```
 
-The only constraint that matters for most users is the **build JDK**. If your Gradle
-daemon already runs on JDK 17 (default for AGP 8+ and modern Kotlin), no version
-bumps are needed.
+For example, `User -> UserDto` generates a file named `UserToUserDtoMapper.kt` in the source
+package.
+
+## Verifying Setup
+
+After adding the dependencies, run:
+
+```bash
+./gradlew build
+```
+
+If no mapper is generated:
+
+1. Confirm the KSP plugin is applied to the module with `@AutoMap`.
+2. Confirm the compiler artifact is on `ksp(...)`, not `implementation(...)`.
+3. Confirm the annotated source set is compiled by the task you are running.
+4. Check `build/generated/ksp/<sourceSet>/kotlin`.
+
+## Building this repository
+
+```bash
+./gradlew build
+```
+
+Generate API documentation:
+
+```bash
+./gradlew dokkaGenerate
+```
+
+Build the MkDocs site:
+
+```bash
+./build-scripts/build-docs.sh
+```

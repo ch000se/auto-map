@@ -1,4 +1,4 @@
-﻿package io.github.ch000se.automap.compiler.support
+package io.github.ch000se.automap.compiler.support
 
 import io.github.ch000se.automap.compiler.AutoMapSymbolProcessorProvider
 import com.tschuchort.compiletesting.JvmCompilationResult
@@ -18,6 +18,7 @@ object CompilationHelper {
                 symbolProcessorProviders += AutoMapSymbolProcessorProvider()
             }
             inheritClassPath = true
+            messageOutputStream = System.out
         }.compile()
     }
 
@@ -29,16 +30,6 @@ object CompilationHelper {
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, exitCode)
     }
 
-    fun JvmCompilationResult.assertHasGeneratedFile(fileName: String): String {
-        val generated = sourcesGeneratedBySymbolProcessor.toList()
-        val file = generated.firstOrNull { it.name == fileName }
-        assertTrue(
-            file != null,
-            "Expected generated file '$fileName' but found: ${generated.map { it.name }}",
-        )
-        return file!!.readText()
-    }
-
     fun JvmCompilationResult.assertErrorContains(substring: String) {
         assertTrue(
             messages.contains(substring, ignoreCase = true),
@@ -46,13 +37,32 @@ object CompilationHelper {
         )
     }
 
-    fun String.assertContent(expected: String) {
-        assertEquals(expected.compacted(), this.compacted())
+    fun JvmCompilationResult.generatedSource(fileName: String): String {
+        val generated = sourcesGeneratedBySymbolProcessor.toList()
+        val file = generated.firstOrNull { it.name == fileName }
+        assertTrue(file != null, "Expected generated file '$fileName' but found: ${generated.map { it.name }}")
+        return file!!.readText()
     }
 
-    private fun String.compacted(): String =
-        lines()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .joinToString("\n")
+    fun JvmCompilationResult.loadClass(fqn: String): Class<*> = classLoader.loadClass(fqn)
+
+    /** Instantiate a source class via its single constructor. */
+    fun JvmCompilationResult.newSource(fqn: String, vararg args: Any?): Any {
+        val ctor = loadClass(fqn).constructors.first()
+        return ctor.newInstance(*args)
+    }
+
+    /**
+     * Invokes the generated extension function defined in `mapperFqn` (e.g., "demo.UserToUserDtoMapperKt").
+     * The first argument is the receiver; following ones are extra lambda params.
+     */
+    fun JvmCompilationResult.callMapper(
+        mapperFqn: String,
+        mapperFun: String,
+        receiver: Any,
+        vararg extra: Any?,
+    ): Any {
+        val method = loadClass(mapperFqn).declaredMethods.first { it.name == mapperFun }
+        return method.invoke(null, receiver, *extra)
+    }
 }

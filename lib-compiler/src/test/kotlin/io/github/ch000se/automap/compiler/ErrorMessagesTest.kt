@@ -1,175 +1,84 @@
 package io.github.ch000se.automap.compiler
 
+import com.tschuchort.compiletesting.SourceFile
+import io.github.ch000se.automap.compiler.support.CompilationHelper
 import io.github.ch000se.automap.compiler.support.CompilationHelper.assertError
 import io.github.ch000se.automap.compiler.support.CompilationHelper.assertErrorContains
-import io.github.ch000se.automap.compiler.support.CompilationHelper.assertHasGeneratedFile
-import io.github.ch000se.automap.compiler.support.CompilationHelper.assertOk
-import io.github.ch000se.automap.compiler.support.CompilationHelper.compile
-import com.tschuchort.compiletesting.SourceFile
 import org.junit.jupiter.api.Test
 
 class ErrorMessagesTest {
 
     @Test
-    fun `regular class as source is allowed`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
+    fun `mismatched target type produces a Cannot map field error`() {
+        val src = SourceFile.kotlin(
+            "Bad.kt",
+            """
+            package demo
+            import io.github.ch000se.automap.annotations.AutoMap
 
-                @AutoMap(target = UserDto::class)
-                class User(val id: Long)   // not data class, but still allowed
+            data class Other(val raw: Int)
 
-                data class UserDto(val id: Long)
-                """.trimIndent(),
-            ),
+            @AutoMap(target = TargetDto::class)
+            data class Source(val id: Other)
+
+            data class TargetDto(val id: Other)
+            data class WrongTarget(val id: Long)
+            """.trimIndent(),
         )
+        // The above mapping is actually fine (same Other type).
+        // Force a real type mismatch:
+        val bad = SourceFile.kotlin(
+            "Bad2.kt",
+            """
+            package demo2
+            import io.github.ch000se.automap.annotations.AutoMap
 
-        result.assertOk()
-        result.assertHasGeneratedFile("UserToUserDtoMapper.kt")
-    }
+            data class Foo(val data: Int)
 
-    @Test
-    fun `regular class as target with primary constructor is allowed`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
+            @AutoMap(target = TargetDto::class)
+            data class Source(val id: Foo)
 
-                @AutoMap(target = UserDto::class)
-                data class User(val id: Long)
-
-                class UserDto(val id: Long)  // not data class, but has primary constructor
-                """.trimIndent(),
-            ),
+            data class TargetDto(val id: Long)
+            """.trimIndent(),
         )
-
-        result.assertOk()
-        result.assertHasGeneratedFile("UserToUserDtoMapper.kt")
-    }
-
-    @Test
-    fun `error when target has no primary constructor`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
-
-                @AutoMap(target = UserDto::class)
-                data class User(val id: Long)
-
-                class UserDto {
-                    val id: Long = 0
-                }
-                """.trimIndent(),
-            ),
-        )
-
+        val result = CompilationHelper.compile(bad)
         result.assertError()
-        result.assertErrorContains("primary constructor")
+        result.assertErrorContains("Cannot map field")
     }
 
     @Test
-    fun `error for duplicate Field target entries`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
+    fun `AutoMap with both target and source set errors`() {
+        val src = SourceFile.kotlin(
+            "Both.kt",
+            """
+            package demo
+            import io.github.ch000se.automap.annotations.AutoMap
 
-                @AutoMap(
-                    target = UserDto::class,
-                    fields = [
-                        AutoMap.Field(target = "name", source = "firstName"),
-                        AutoMap.Field(target = "name", constant = "\"Bob\""),
-                    ],
-                )
-                data class User(val firstName: String)
+            data class Foo(val id: Long)
 
-                data class UserDto(val name: String)
-                """.trimIndent(),
-            ),
+            @AutoMap(target = Bar::class, source = Foo::class)
+            data class Bar(val id: Long)
+            """.trimIndent(),
         )
-
-        result.assertError()
-        result.assertErrorContains("duplicate")
+        val r = CompilationHelper.compile(src)
+        r.assertError()
+        r.assertErrorContains("exactly one of 'target' or 'source'")
     }
 
     @Test
-    fun `error when multiple strategies set in one Field`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
+    fun `AutoMap with neither target nor source errors`() {
+        val src = SourceFile.kotlin(
+            "Neither.kt",
+            """
+            package demo
+            import io.github.ch000se.automap.annotations.AutoMap
 
-                @AutoMap(
-                    target = UserDto::class,
-                    fields = [AutoMap.Field(target = "name", source = "firstName", constant = "\"Bob\"")],
-                )
-                data class User(val firstName: String)
-
-                data class UserDto(val name: String)
-                """.trimIndent(),
-            ),
+            @AutoMap
+            data class Bar(val id: Long)
+            """.trimIndent(),
         )
-
-        result.assertError()
-        result.assertErrorContains("only one of")
-    }
-
-    @Test
-    fun `error when Field source does not exist in source class`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
-
-                @AutoMap(
-                    target = UserDto::class,
-                    fields = [AutoMap.Field(target = "name", source = "nonExistent")],
-                )
-                data class User(val id: Long)
-
-                data class UserDto(val name: String)
-                """.trimIndent(),
-            ),
-        )
-
-        result.assertError()
-        result.assertErrorContains("not found")
-    }
-
-    @Test
-    fun `auto-custom generated when field absent and no default`() {
-        val result = compile(
-            SourceFile.kotlin(
-                "Models.kt",
-                """
-                package test
-                import io.github.ch000se.automap.annotations.AutoMap
-
-                @AutoMap(target = Dto::class)
-                data class Entity(val id: Long)
-
-                data class Dto(val id: Long, val computed: String)
-                """.trimIndent(),
-            ),
-        )
-
-        // The KSP processor itself does NOT log an error; it generates an abstract mapper class
-        // plus a broken extension file that tries to instantiate the abstract class directly.
-        // Kotlin then reports a compile error because abstract classes cannot be instantiated.
-        result.assertError()
+        val r = CompilationHelper.compile(src)
+        r.assertError()
+        r.assertErrorContains("exactly one of 'target' or 'source'")
     }
 }

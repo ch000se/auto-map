@@ -9,8 +9,20 @@ import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.parameters.VisibilityModifier
 import java.util.Properties
 
+/**
+ * Gradle convention plugin that configures publication metadata and Dokka output.
+ *
+ * The plugin reads public Maven metadata from `gradle-public.properties`, lets project properties
+ * override those defaults, configures Vanniktech Maven Publish, adds a local test repository under
+ * `build/repo`, and limits Dokka documentation to public declarations.
+ */
 class PublishingConventionPlugin : Plugin<Project> {
 
+    /**
+     * Applies publishing and documentation defaults to [target].
+     *
+     * @param target Gradle project receiving this convention plugin.
+     */
     override fun apply(target: Project) = with(target) {
 
         pluginManager.apply("com.vanniktech.maven.publish")

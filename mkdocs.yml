@@ -12,6 +12,10 @@ theme:
   features:
     - navigation.top
     - navigation.footer
+    - navigation.sections
+    - navigation.indexes
+    - navigation.tracking
+    - toc.follow
     - content.code.copy
   palette:
     - media: "(prefers-color-scheme: light)"
@@ -27,8 +31,11 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
-  - Usage Guide: usage.md
+  - Getting Started:
+      - Installation: installation.md
+      - Usage Guide: usage.md
+  - Reference:
+      - Compiler Notes: compiler.md
 
 markdown_extensions:
   - admonition
