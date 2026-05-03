@@ -1,7 +1,9 @@
 package io.github.ch000se.automap.compiler.generation
 
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSAnnotated
 import com.squareup.kotlinpoet.CodeBlock
 import io.github.ch000se.automap.compiler.MappingException
 
@@ -23,6 +25,7 @@ private const val MAP_FQN = "kotlin.collections.Map"
 @Suppress("TooManyFunctions")
 internal class ExpressionResolver(
     private val autoMapIndex: Map<String, Set<String>>,
+    private val allowNarrowing: Boolean = false,
 ) {
 
     /**
@@ -33,17 +36,25 @@ internal class ExpressionResolver(
      */
     fun expressionFor(context: ExpressionContext): CodeBlock {
         return exactExpression(context)
-            ?: primitiveExpression(context.sourceType, context.targetType, CodeBlock.of("%N", context.propName))
-            ?: nestedExpression(context.sourceType, context.targetType, CodeBlock.of("%N", context.propName))
+            ?: primitiveExpression(context.sourceType, context.targetType, context.valueExpression)
+            ?: nestedExpression(context.sourceType, context.targetType, context.valueExpression)
             ?: collectionExpression(context)
             ?: errorTypeMismatch(context)
     }
 
+    /** Returns true when a flattened field can be assigned or converted to a target parameter. */
+    fun canMapFlattened(sourceType: KSType, targetType: KSType): Boolean {
+        val sameBase = sourceType.fqn() == targetType.fqn()
+        val sameNullability = sourceType.isMarkedNullable == targetType.isMarkedNullable
+        return (sameBase && sameNullability && typeArgsEqual(sourceType, targetType)) ||
+            primitiveExpression(sourceType, targetType, CodeBlock.of("value")) != null
+    }
+
     private fun exactExpression(context: ExpressionContext): CodeBlock? {
         val sameBase = context.sourceType.fqn() == context.targetType.fqn()
-        val sameNullability = context.sourceType.isMarkedNullable == context.targetType.isMarkedNullable
-        return if (sameBase && sameNullability && typeArgsEqual(context.sourceType, context.targetType)) {
-            CodeBlock.of("%N", context.propName)
+        val nullabilityOk = context.targetType.isMarkedNullable || !context.sourceType.isMarkedNullable
+        return if (sameBase && nullabilityOk && typeArgsEqual(context.sourceType, context.targetType)) {
+            context.valueExpression
         } else {
             null
         }
@@ -54,8 +65,11 @@ internal class ExpressionResolver(
         targetType: KSType,
         valueExpression: CodeBlock,
     ): CodeBlock? {
-        if (sourceType.isMarkedNullable) return null
-        val conversion = primitiveConversion(sourceType.fqn(), targetType.fqn()) ?: return null
+        val conversion = primitiveConversion(sourceType, targetType) ?: return null
+        if (sourceType.isMarkedNullable && !targetType.isMarkedNullable) return null
+        if (sourceType.isMarkedNullable) {
+            return CodeBlock.of("%L?%L", valueExpression, conversion)
+        }
         return CodeBlock.of("%L%L", valueExpression, conversion)
     }
 
@@ -64,15 +78,21 @@ internal class ExpressionResolver(
         targetType: KSType,
         valueExpression: CodeBlock,
     ): CodeBlock? {
-        if (sourceType.isMarkedNullable != targetType.isMarkedNullable) return null
+        if (sourceType.isMarkedNullable && !targetType.isMarkedNullable) return null
         if (!hasAutoMap(sourceType.fqn(), targetType.fqn())) return null
-        return CodeBlock.of("%L.%N()", valueExpression, "to${targetType.declaration.simpleName.asString()}")
+        val call = "to${targetType.declaration.simpleName.asString()}"
+        return if (sourceType.isMarkedNullable) {
+            CodeBlock.of("%L?.%N()", valueExpression, call)
+        } else {
+            CodeBlock.of("%L.%N()", valueExpression, call)
+        }
     }
 
     private fun collectionExpression(context: ExpressionContext): CodeBlock? {
         val sourceBase = context.sourceType.classFqn()
         val targetBase = context.targetType.classFqn()
         if (sourceBase == null || sourceBase != targetBase) return null
+        if (context.sourceType.isMarkedNullable && !context.targetType.isMarkedNullable) return null
 
         return when (sourceBase) {
             LIST_FQN -> listOrSetExpression(context, suffix = "")
@@ -87,9 +107,12 @@ internal class ExpressionResolver(
         val targetElement = context.targetType.arguments.firstOrNull()?.type?.resolve() ?: return null
         val elementExpression = elementExpr(sourceElement, targetElement) ?: return null
         return if (elementExpression.isIdentity) {
-            CodeBlock.of("%N", context.propName)
+            context.valueExpression
+        } else if (context.sourceType.isMarkedNullable) {
+            val nullableSuffix = if (suffix == ".toSet()") "?.toSet()" else suffix
+            CodeBlock.of("%L?.map { %L }%L", context.valueExpression, elementExpression.code, nullableSuffix)
         } else {
-            CodeBlock.of("%N.map { %L }%L", context.propName, elementExpression.code, suffix)
+            CodeBlock.of("%L.map { %L }%L", context.valueExpression, elementExpression.code, suffix)
         }
     }
 
@@ -98,9 +121,11 @@ internal class ExpressionResolver(
         val targetValue = context.targetType.arguments.getOrNull(1)?.type?.resolve() ?: return null
         val valueExpression = elementExpr(sourceValue, targetValue, CodeBlock.of("entry.value")) ?: return null
         return if (valueExpression.isIdentity) {
-            CodeBlock.of("%N", context.propName)
+            context.valueExpression
+        } else if (context.sourceType.isMarkedNullable) {
+            CodeBlock.of("%L?.mapValues { entry -> %L }", context.valueExpression, valueExpression.code)
         } else {
-            CodeBlock.of("%N.mapValues { entry -> %L }", context.propName, valueExpression.code)
+            CodeBlock.of("%L.mapValues { entry -> %L }", context.valueExpression, valueExpression.code)
         }
     }
 
@@ -110,8 +135,8 @@ internal class ExpressionResolver(
         valueExpression: CodeBlock = CodeBlock.of("it"),
     ): ElementExpression? {
         val sameBase = sourceElement.fqn() == targetElement.fqn()
-        val sameNullability = sourceElement.isMarkedNullable == targetElement.isMarkedNullable
-        if (sameBase && sameNullability && typeArgsEqual(sourceElement, targetElement)) {
+        val nullabilityOk = targetElement.isMarkedNullable || !sourceElement.isMarkedNullable
+        if (sameBase && nullabilityOk && typeArgsEqual(sourceElement, targetElement)) {
             return ElementExpression(valueExpression, isIdentity = true)
         }
 
@@ -138,33 +163,131 @@ internal class ExpressionResolver(
             }
     }
 
-    private fun primitiveConversion(sourceFqn: String, targetFqn: String): String? {
+    private fun primitiveConversion(sourceType: KSType, targetType: KSType): String? {
+        val sourceFqn = sourceType.fqn()
+        val targetFqn = targetType.fqn()
         val widenings = mapOf(
+            ("kotlin.Byte" to "kotlin.Short") to ".toShort()",
+            ("kotlin.Byte" to "kotlin.Int") to ".toInt()",
+            ("kotlin.Byte" to "kotlin.Long") to ".toLong()",
+            ("kotlin.Short" to "kotlin.Int") to ".toInt()",
+            ("kotlin.Short" to "kotlin.Long") to ".toLong()",
             ("kotlin.Int" to "kotlin.Long") to ".toLong()",
             ("kotlin.Int" to "kotlin.String") to ".toString()",
             ("kotlin.Long" to "kotlin.String") to ".toString()",
+            ("kotlin.Boolean" to "kotlin.String") to ".toString()",
+            ("kotlin.Char" to "kotlin.String") to ".toString()",
+            ("kotlin.Byte" to "kotlin.String") to ".toString()",
+            ("kotlin.Short" to "kotlin.String") to ".toString()",
             ("kotlin.Float" to "kotlin.Double") to ".toDouble()",
             ("kotlin.Float" to "kotlin.String") to ".toString()",
             ("kotlin.Double" to "kotlin.String") to ".toString()",
         )
+        if (targetFqn == "kotlin.String" && sourceType.isEnum()) return ".name"
+        val narrowings = if (allowNarrowing) {
+            mapOf(
+                ("kotlin.Long" to "kotlin.Int") to ".toInt()",
+                ("kotlin.Double" to "kotlin.Float") to ".toFloat()",
+            )
+        } else {
+            emptyMap()
+        }
         return widenings[sourceFqn to targetFqn]
-            ?: ".toString()".takeIf { targetFqn == "kotlin.String" && sourceFqn != "kotlin.String" }
+            ?: narrowings[sourceFqn to targetFqn]
     }
 
+    private fun KSType.isEnum(): Boolean =
+        (declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+
     private fun errorTypeMismatch(context: ExpressionContext): Nothing {
+        if (context.sourceType.isMarkedNullable && !context.targetType.isMarkedNullable) {
+            throw MappingException(
+                buildString {
+                    append("Cannot map nullable field \"")
+                        .append(context.targetParamName)
+                        .append("\" to non-null target field.\n\n")
+                    append("Source:\n")
+                    append("- ").append(context.renderedSource).append(": ").append(context.sourceType.render()).append("\n\n")
+                    append("Target:\n")
+                    append("- ").append(context.targetParamName).append(": ").append(context.targetType.render()).append("\n\n")
+                    append("AutoMap does not generate \"!!\".\n\n")
+                    append("Fix:\n")
+                    append("1. Make target field nullable: ").append(context.targetType.render()).append("?\n")
+                    append("2. Add @MapWith(\"converter\") to handle null explicitly\n")
+                    append("3. Add a default value strategy")
+                },
+                context.sourceSymbol ?: context.source,
+            )
+        }
         throw MappingException(
             buildString {
                 append("Cannot map field \"").append(context.targetParamName).append("\" in ")
                 append(context.target.simpleName.asString()).append(".\n\n")
                 append("Source candidates:\n  - ")
-                    .append(context.propName)
+                    .append(context.renderedSource)
                     .append(": ")
                     .append(context.sourceType.fqn())
                     .append("\n\n")
+                appendMissingNestedMapperHint(context)
                 appendFixHints(context.targetParamName)
             },
-            context.source,
+            context.sourceSymbol ?: context.source,
         )
+    }
+
+    private fun KSType.render(): String {
+        val args = arguments.mapNotNull { it.type?.resolve() }
+        val suffix = if (args.isEmpty()) "" else args.joinToString(prefix = "<", postfix = ">") { it.render() }
+        val nullable = if (isMarkedNullable) "?" else ""
+        return "${fqn()}$suffix$nullable"
+    }
+
+    private fun StringBuilder.appendMissingNestedMapperHint(context: ExpressionContext) {
+        val directSource = context.sourceType.declaration as? KSClassDeclaration
+        val directTarget = context.targetType.declaration as? KSClassDeclaration
+        if (directSource != null &&
+            directTarget != null &&
+            directSource.qualifiedName != directTarget.qualifiedName &&
+            directSource.isUserType() &&
+            directTarget.isUserType()
+        ) {
+            append("Source type:\n")
+            append("- ").append(directSource.simpleName.asString()).append("\n\n")
+            append("Target type:\n")
+            append("- ").append(directTarget.simpleName.asString()).append("\n\n")
+            append("No mapper found for ")
+                .append(directSource.simpleName.asString())
+                .append(" -> ")
+                .append(directTarget.simpleName.asString())
+                .append(".\n\n")
+            append("To enable nested auto-mapping, annotate ")
+                .append(directSource.simpleName.asString())
+                .append(" with @AutoMap(")
+                .append(directTarget.simpleName.asString())
+                .append("::class).\n\n")
+        }
+
+        val sourceElement = context.sourceType.arguments.firstOrNull()?.type?.resolve()
+        val targetElement = context.targetType.arguments.firstOrNull()?.type?.resolve()
+        val sourceDecl = sourceElement?.declaration as? KSClassDeclaration
+        val targetDecl = targetElement?.declaration as? KSClassDeclaration
+        if (sourceDecl != null &&
+            targetDecl != null &&
+            sourceDecl.qualifiedName != targetDecl.qualifiedName &&
+            sourceDecl.isUserType() &&
+            targetDecl.isUserType()
+        ) {
+            append("No mapper found for ")
+                .append(sourceDecl.simpleName.asString())
+                .append(" -> ")
+                .append(targetDecl.simpleName.asString())
+                .append(".\n\n")
+        }
+    }
+
+    private fun KSClassDeclaration.isUserType(): Boolean {
+        val fqn = qualifiedName?.asString() ?: return false
+        return !fqn.startsWith("kotlin.") && !fqn.startsWith("java.") && !fqn.startsWith("javax.")
     }
 
     private data class ElementExpression(
@@ -182,6 +305,7 @@ internal class ExpressionResolver(
  * @property sourceType Resolved type of [propName].
  * @property targetType Resolved type of the target constructor parameter.
  * @property targetParamName Name of the target constructor parameter, used in diagnostics.
+ * @property valueExpression Kotlin expression that reads the selected source value.
  */
 internal data class ExpressionContext(
     val source: KSClassDeclaration,
@@ -190,4 +314,8 @@ internal data class ExpressionContext(
     val sourceType: KSType,
     val targetType: KSType,
     val targetParamName: String,
-)
+    val valueExpression: CodeBlock = CodeBlock.of("%N", propName),
+    val sourceSymbol: KSAnnotated? = null,
+) {
+    val renderedSource: String = valueExpression.toString()
+}

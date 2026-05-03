@@ -27,5 +27,9 @@ public class AutoMapSymbolProcessorProvider : SymbolProcessorProvider {
      * @return A configured [SymbolProcessor] that handles `@AutoMap` annotations.
      */
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        AutoMapSymbolProcessor(environment.codeGenerator, environment.logger)
+        AutoMapSymbolProcessor(
+            codeGenerator = environment.codeGenerator,
+            logger = environment.logger,
+            rawOptions = environment.options,
+        )
 }

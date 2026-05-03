@@ -1,6 +1,7 @@
 package io.github.ch000se.automap.compiler
 
 import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.KSFile
 import io.github.ch000se.automap.compiler.generation.MapperEmitter
 import io.github.ch000se.automap.compiler.generation.MapperResolver
@@ -19,11 +20,18 @@ import io.github.ch000se.automap.compiler.generation.MapperResolver
  */
 internal class MapperGenerator(
     codeGenerator: CodeGenerator,
+    kspResolver: Resolver,
     autoMapIndex: Map<String, Set<String>>,
+    options: AutoMapOptions,
     dependencyFiles: List<KSFile>,
 ) {
-    private val resolver = MapperResolver(autoMapIndex)
-    private val emitter = MapperEmitter(codeGenerator, dependencyFiles)
+    private val resolver = MapperResolver(
+        kspResolver = kspResolver,
+        autoMapIndex = autoMapIndex,
+        options = options,
+        knownMappingFiles = dependencyFiles,
+    )
+    private val emitter = MapperEmitter(codeGenerator)
 
     /**
      * Generates mapper extension functions for [job].

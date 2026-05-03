@@ -18,10 +18,16 @@ registry.
 - [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Generated Output](#generated-output)
+- [Auto-flatten Mapping](#auto-flatten-mapping)
 - [Features](#features)
 - [Artifacts](#artifacts)
 - [Comparison](#comparison)
 - [Requirements](#requirements)
+- [KSP Options](#ksp-options)
+- [Limitations](#limitations)
+- [Platform Support](#platform-support)
+- [Java Interop](#java-interop)
+- [Sample Models](#sample-models)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -121,6 +127,68 @@ it at:
 build/generated/ksp/<sourceSet>/kotlin
 ```
 
+Nested AutoMap pairs are reused automatically, including nullable values and list/set elements:
+
+```kotlin
+@AutoMap(AddressDto::class)
+data class Address(val city: String)
+
+@AutoMap(UserDto::class)
+data class User(val address: Address)
+
+data class UserDto(val address: AddressDto)
+
+// Generated:
+// address = address.toAddressDto()
+```
+
+For custom one-field conversion, reference a function directly:
+
+```kotlin
+@AutoMap(Note::class)
+data class NoteDbModel(
+    @MapWith("toContentItems")
+    val content: List<ContentItemDbModel>,
+)
+
+fun toContentItems(value: List<ContentItemDbModel>): List<ContentItem> =
+    value.map { it.toContentItem() }
+```
+
+Target constructor defaults are respected. If a target parameter has a default value and no source
+field maps to it, AutoMap omits that constructor argument.
+
+## Auto-flatten Mapping
+
+AutoMap can flatten Room projection and `@Embedded`-style source models at compile time. Enable it
+globally with `flatten = true`:
+
+```kotlin
+@AutoMap(target = Note::class, flatten = true)
+data class NoteWithAuthorDbModel(
+    val noteDbModel: NoteDbModel,
+    val authorDbModel: AuthorDbModel,
+)
+
+data class NoteDbModel(val id: Int, val title: String)
+data class AuthorDbModel(val authorName: String)
+data class Note(val id: Int, val title: String, val authorName: String)
+```
+
+Generated:
+
+```kotlin
+fun NoteWithAuthorDbModel.toNote(): Note = Note(
+    id = noteDbModel.id,
+    title = noteDbModel.title,
+    authorName = authorDbModel.authorName,
+)
+```
+
+Use `@Flatten` on selected source properties when only specific nested objects should be searched.
+If AutoMap reports multiple flattened candidates, use `@Flatten` only on the intended property or
+add `@MapName` to explicitly select the source field.
+
 ## Features
 
 | Feature | Annotation / parameter | Description |
@@ -130,12 +198,14 @@ build/generated/ksp/<sourceSet>/kotlin
 | [Bidirectional mapping](docs/usage.md#3-bidirectional-mapping) | `bidirectional = true` | Generates both directions from one annotation when the mapping is symmetric. |
 | [Field rename](docs/usage.md#4-renamed-fields) | `@MapName` | Maps a source property to a target constructor parameter with a different name. |
 | [Ignored field](docs/usage.md#5-ignored-fields) | `@MapIgnore` | Omits a source property; the target parameter must provide a default value. |
-| [Class converter](docs/usage.md#class-converter) | `@MapWith(Converter::class)` | Calls custom conversion logic for one field. |
+| [Function converter](docs/usage.md#function-converter) | `@MapWith("functionName")` | Calls custom conversion logic for one field. |
 | [Lambda converter](docs/usage.md#lambda-parameter) | `@MapWith` | Adds a mapper lambda parameter when conversion depends on runtime context. |
 | [Nested mapping](docs/usage.md#7-nested-mapping) | `@AutoMap` on nested types | Calls generated nested mapper functions automatically. |
 | [Collection mapping](docs/usage.md#8-collections) | `List`, `Set`, `Map` | Maps list/set elements and map values when element mappings are known. |
 | [Primitive conversion](docs/usage.md#9-primitive-conversions) | built in | Converts common primitive pairs such as `Int -> Long` and values to `String`. |
-| [Compiler diagnostics](docs/usage.md#13-error-messages) | KSP errors | Reports missing fields, type mismatches, and unsupported bidirectional mappings at compile time. |
+| [Auto-flatten mapping](docs/usage.md#10-auto-flatten-mapping) | `flatten = true`, `@Flatten` | Maps nested source properties into flat target constructor parameters. |
+| [List variant control](docs/usage.md#15-list-variant-control) | `generateListVariant = false` | Skips generated `List<Source>.toTargetList()` helpers. |
+| [Compiler diagnostics](docs/usage.md#14-error-messages) | KSP errors | Reports missing fields, type mismatches, and unsupported bidirectional mappings at compile time. |
 
 ## Artifacts
 
@@ -170,6 +240,81 @@ the annotated classes.
 | Android Gradle Plugin | A modern AGP version with KSP support for Android consumers. |
 
 KSP versions are tied to Kotlin compiler versions. Keep them aligned when upgrading Kotlin.
+
+## KSP Options
+
+Global defaults can be configured in Gradle:
+
+```kotlin
+ksp {
+    arg("automap.flatten", "false")
+    arg("automap.generateListVariant", "true")
+    arg("automap.allowNarrowing", "false")
+    arg("automap.generateRegistryDoc", "true")
+    arg("automap.defaultVisibility", "auto")
+}
+```
+
+Supported values:
+
+| Option | Values | Default |
+|--------|--------|---------|
+| `automap.flatten` | `true`, `false` | `false` |
+| `automap.generateListVariant` | `true`, `false` | `true` |
+| `automap.allowNarrowing` | `true`, `false` | `false` |
+| `automap.generateRegistryDoc` | `true`, `false` | `true` |
+| `automap.defaultVisibility` | `public`, `internal`, `auto` | `auto` |
+
+Annotation arguments override global defaults when they differ from the annotation default.
+
+AutoMap also emits `AutoMapMappers.kt`, an internal documentation-only generated file listing all
+mapping pairs and generated function names. Disable it with
+`arg("automap.generateRegistryDoc", "false")`.
+
+## Limitations
+
+AutoMap currently supports concrete non-generic Kotlin classes with public primary constructors.
+Generic mappers such as `Page<T> -> Page<R>` are not supported yet; create a concrete wrapper or
+write that mapper manually.
+
+AutoMap does not support secondary constructors, factory methods, JavaBean-only getters, sealed
+polymorphic dispatch, or runtime mapper lookup. Nullable source values are never force-unwrapped:
+`String? -> String` requires `@MapWith` or a manual/default strategy.
+
+Nested auto-mapping uses mappings discovered in the current KSP processing run. AutoMap does not
+scan dependency artifacts for generated mapper metadata, so cross-module nested mapper discovery may
+require an explicit `@MapWith`.
+
+Automatic `toString()` conversion is intentionally limited to primitive/enum-like values. AutoMap
+does not convert arbitrary objects or collections to `String` implicitly; use `@MapWith` when that
+string format is part of your mapping contract.
+
+## Platform Support
+
+AutoMap currently targets Kotlin JVM and Android projects. Kotlin Multiplatform `commonMain`
+support is not guaranteed yet. Generated code avoids runtime reflection, but `jvmName` is a
+JVM/Android interop feature.
+
+## Java Interop
+
+Generated Kotlin extension functions are callable from Java through the generated `*MapperKt`
+class. Use `jvmName` when you need a stable Java-callable method name:
+
+```kotlin
+@AutoMap(target = Note::class, jvmName = "convertNoteDbModelToNote")
+data class NoteDbModel(val id: Int)
+```
+
+## Sample Models
+
+The Android sample module under `app/src/main/java/.../example/models/Models.kt` demonstrates the
+current API surface:
+
+- direct source-side mapping;
+- target-side and bidirectional mapping;
+- `@MapName`, `@MapIgnore`, `@MapWith("functionName")`, and lambda `@MapWith`;
+- nested object and list element mapping;
+- `@Flatten` projection mapping.
 
 ## Troubleshooting
 

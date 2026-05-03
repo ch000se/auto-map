@@ -17,9 +17,16 @@ import kotlin.reflect.KClass
  *   setups where a domain model must not import DTO or persistence-layer classes.
  *
  * Set [bidirectional] to `true` to generate both `Source -> Target` and `Target -> Source`
- * functions from a single annotation. Bidirectional generation supports symmetric name remapping
- * with [MapName], but it rejects [MapWith] and [MapIgnore] because those annotations do not have an
- * automatic inverse.
+ * functions from a single annotation. Bidirectional generation is intentionally strict: field-level
+ * mapping annotations such as [MapName], [MapWith], and [MapIgnore] are rejected because AutoMap
+ * cannot prove their reverse direction is correct.
+ *
+ * Set [flatten] to `true` to allow target constructor parameters to be inferred from nested
+ * composite source properties. Use [Flatten] on selected properties when only specific nested
+ * objects should participate in flatten lookup.
+ *
+ * [functionName] changes the generated Kotlin extension function name. [jvmName] adds `@JvmName`
+ * to the generated function for Java callers and JVM signature collision avoidance.
  *
  * Example:
  *
@@ -38,6 +45,13 @@ import kotlin.reflect.KClass
  * @property source Source class that should be mapped into the annotated target class.
  * @property bidirectional Whether the processor should generate mapper functions in both
  *   directions.
+ * @property flatten Whether unresolved target parameters may be inferred from nested composite
+ *   source properties.
+ * @property generateListVariant Whether AutoMap should also generate `List<Source>.toTargetList()`.
+ * @property functionName Optional custom Kotlin extension function name.
+ * @property jvmName Optional `@JvmName` value for Java callers and JVM signature collision
+ *   avoidance.
+ * @property visibility Visibility policy for generated mapper functions.
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.SOURCE)
@@ -45,7 +59,50 @@ public annotation class AutoMap(
     val target: KClass<*> = Nothing::class,
     val source: KClass<*> = Nothing::class,
     val bidirectional: Boolean = false,
+    val flatten: Boolean = false,
+    val generateListVariant: Boolean = true,
+    val functionName: String = "",
+    val jvmName: String = "",
+    val visibility: AutoMapVisibility = AutoMapVisibility.AUTO,
 )
+
+/**
+ * Controls visibility of generated mapper extension functions.
+ *
+ * `AUTO` is the default. It generates an `internal` mapper when either side of the mapping is
+ * internal, otherwise it generates a `public` mapper.
+ */
+public enum class AutoMapVisibility {
+    /** Use `internal` when either side of the mapping is internal, otherwise `public`. */
+    AUTO,
+
+    /** Always generate a public mapper function. */
+    PUBLIC,
+
+    /** Always generate an internal mapper function. */
+    INTERNAL,
+}
+
+/**
+ * Marks a source property as a composite object whose fields can be searched for auto-flattened
+ * mappings.
+ *
+ * Use this when only selected nested properties should participate in flatten lookup instead of
+ * enabling `@AutoMap(flatten = true)` globally.
+ *
+ * Example:
+ *
+ * ```kotlin
+ * @AutoMap(target = Note::class)
+ * data class NoteProjection(
+ *     @Flatten val note: NoteDbModel,
+ *     @Flatten val author: AuthorDbModel,
+ * )
+ * ```
+ */
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.SOURCE)
+public annotation class Flatten
 
 /**
  * Maps a source property or constructor parameter to a target constructor parameter with a
@@ -55,8 +112,8 @@ public annotation class AutoMap(
  * Apply `@MapName("targetParameterName")` when the logical field is the same but the source and
  * target names differ.
  *
- * When used together with `@AutoMap(bidirectional = true)`, the rename is inverted automatically
- * for the reverse mapper.
+ * `@MapName` cannot be used together with `@AutoMap(bidirectional = true)`. Renames are one-way
+ * instructions, and AutoMap does not silently infer the reverse mapping.
  *
  * Example:
  *
@@ -98,44 +155,13 @@ public annotation class MapName(val value: String)
 public annotation class MapIgnore
 
 /**
- * Contract for class-based field converters used by [MapWith].
- *
- * Implement this interface when a source property needs explicit conversion before it is passed to
- * the target constructor. Converters should be stateless. If the converter is declared as an
- * `object`, AutoMap calls `Converter.convert(value)` directly. If it is declared as a class,
- * AutoMap creates it with a no-argument constructor and then calls `convert(value)`.
- *
- * Example:
- *
- * ```kotlin
- * object CentsToLabel : AutoMapConverter<Long, String> {
- *     override fun convert(value: Long): String = "$" + value / 100
- * }
- *
- * @AutoMap(target = ProductDto::class)
- * data class Product(@MapWith(CentsToLabel::class) val priceInCents: Long)
- * ```
- *
- * @param Source Source property type accepted by the converter.
- * @param Target Target constructor parameter type returned by the converter.
- */
-public fun interface AutoMapConverter<in Source, out Target> {
-    /**
-     * Converts one source property value into the value passed to the target constructor.
-     *
-     * @param value Source property value from the generated mapper receiver.
-     * @return Converted value for the target constructor argument.
-     */
-    public fun convert(value: Source): Target
-}
-
-/**
  * Converts a source property through custom mapping logic.
  *
- * If [value] points to an [AutoMapConverter], AutoMap emits a call to the converter's `convert`
- * function and passes the source property as its only argument.
+ * If [value] or [fn] names a function, AutoMap emits a direct function call and passes the source
+ * property as its only argument. The function must take exactly one parameter compatible with the
+ * source property type and return a type compatible with the target constructor parameter.
  *
- * If [value] is left as its default, AutoMap adds a lambda parameter to the generated mapper
+ * If both are left as their defaults, AutoMap adds a lambda parameter to the generated mapper
  * function. This is useful when conversion requires runtime context such as a formatter, locale,
  * repository, or configuration object.
  *
@@ -145,21 +171,19 @@ public fun interface AutoMapConverter<in Source, out Target> {
  * Example:
  *
  * ```kotlin
- * object CentsToLabel : AutoMapConverter<Long, String> {
- *     override fun convert(value: Long): String = "$" + value / 100
- * }
+ * @MapWith("formatCents")
+ * val priceInCents: Long
  *
- * @AutoMap(target = ProductDto::class)
- * data class Product(@MapWith(CentsToLabel::class) val priceInCents: Long)
- *
- * data class ProductDto(val priceInCents: String)
+ * fun formatCents(value: Long): String = "$" + value / 100
  * ```
  *
- * @property value Converter type. Leave as [AutoMapConverter] to request a generated lambda
- *   parameter named after the target field.
+ * @property value Function reference. Supports same-package names, fully qualified top-level
+ *   functions, and object function references.
+ * @property fn Named alias for [value] when a more explicit argument name is preferred.
  */
 @Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.SOURCE)
 public annotation class MapWith(
-    val value: KClass<out AutoMapConverter<*, *>> = AutoMapConverter::class,
+    val value: String = "",
+    val fn: String = "",
 )

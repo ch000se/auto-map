@@ -15,17 +15,14 @@ class BidirectionalErrorTest {
             """
             package demo
             import io.github.ch000se.automap.annotations.AutoMap
-            import io.github.ch000se.automap.annotations.AutoMapConverter
             import io.github.ch000se.automap.annotations.MapWith
 
-            object ComputeTax : AutoMapConverter<Long, Long> {
-                override fun convert(value: Long): Long = value
-            }
+            fun computeTax(value: Long): Long = value
 
             @AutoMap(target = ProductDto::class, bidirectional = true)
             data class Product(
                 val id: Long,
-                @MapWith(ComputeTax::class) val priceInCents: Long,
+                @MapWith("computeTax") val priceInCents: Long,
             )
 
             data class ProductDto(val id: Long, val priceInCents: Long)
@@ -34,6 +31,30 @@ class BidirectionalErrorTest {
         val r = CompilationHelper.compile(src)
         r.assertError()
         r.assertErrorContains("priceInCents")
+        r.assertErrorContains("bidirectional")
+    }
+
+    @Test
+    fun `bidirectional with MapName errors with field name`() {
+        val src = SourceFile.kotlin(
+            "Contact.kt",
+            """
+            package demo
+            import io.github.ch000se.automap.annotations.AutoMap
+            import io.github.ch000se.automap.annotations.MapName
+
+            @AutoMap(target = ContactDto::class, bidirectional = true)
+            data class Contact(
+                val id: Long,
+                @MapName("displayName") val name: String,
+            )
+
+            data class ContactDto(val id: Long, val displayName: String)
+            """.trimIndent(),
+        )
+        val r = CompilationHelper.compile(src)
+        r.assertError()
+        r.assertErrorContains("name")
         r.assertErrorContains("bidirectional")
     }
 }

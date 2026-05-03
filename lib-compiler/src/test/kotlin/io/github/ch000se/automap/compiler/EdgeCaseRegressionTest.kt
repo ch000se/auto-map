@@ -57,7 +57,7 @@ class EdgeCaseRegressionTest {
         )
         val result = CompilationHelper.compile(source)
         result.assertError()
-        result.assertErrorContains("Cannot map field")
+        result.assertErrorContains("Cannot map nullable field")
         result.assertErrorContains("count")
     }
 

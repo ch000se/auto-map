@@ -1,7 +1,7 @@
 package io.github.ch000se.automap.example.models
 
 import io.github.ch000se.automap.annotations.AutoMap
-import io.github.ch000se.automap.annotations.AutoMapConverter
+import io.github.ch000se.automap.annotations.Flatten
 import io.github.ch000se.automap.annotations.MapIgnore
 import io.github.ch000se.automap.annotations.MapName
 import io.github.ch000se.automap.annotations.MapWith
@@ -24,7 +24,7 @@ data class User(
     val id: Long,
     val name: String,
     val email: String,
-    @param:MapIgnore val passwordHash: String,
+    @property:MapIgnore val passwordHash: String,
 )
 
 /**
@@ -41,23 +41,15 @@ data class User(
 data class UserDto(val id: Long, val name: String, val email: String, val passwordHash: String = "")
 
 /**
- * Example class-based converter used by [Product.priceInCents].
+ * Function converter used by [Product.priceInCents].
  */
-object ComputeTax : AutoMapConverter<Long, Long> {
-    /**
-     * Calculates an example tax amount from [value].
-     *
-     * @param value Price amount in cents.
-     * @return Example tax amount calculated from [value].
-     */
-    override fun convert(value: Long): Long = value / SAMPLE_TAX_DIVISOR
-}
+fun computeTax(value: Long): Long = value / SAMPLE_TAX_DIVISOR
 
 /**
  * Example product model used to demonstrate renamed fields and custom conversions.
  *
  * [name] is mapped to `ProductDto.title` with [MapName]. [priceInCents] uses the named
- * [ComputeTax] converter, while [displayPrice] uses a generated lambda parameter supplied by the
+ * [computeTax] converter function, while [displayPrice] uses a generated lambda parameter supplied by the
  * caller.
  *
  * @property id Stable product identifier.
@@ -68,20 +60,20 @@ object ComputeTax : AutoMapConverter<Long, Long> {
 @AutoMap(target = ProductDto::class)
 data class Product(
     val id: Long,
-    @param:MapName("title") val name: String,
-    @param:MapWith(ComputeTax::class) val priceInCents: Long,
-    @param:MapWith val displayPrice: Long,
+    @property:MapName("title") val name: String,
+    @property:MapWith("computeTax") val priceInCents: Long,
+    @property:MapWith val displayPrice: Long,
 )
 
 /**
  * Example DTO produced from [Product].
  *
- * [title] receives [Product.name], [priceInCents] receives the named converter result, and
+ * [title] receives [Product.name], [priceInCents] receives the function converter result, and
  * [displayPrice] receives the generated lambda converter result.
  *
  * @property id Stable product identifier.
  * @property title Product title produced from [Product.name].
- * @property priceInCents Converted price value produced by [ComputeTax].
+ * @property priceInCents Converted price value produced by [computeTax].
  * @property displayPrice Formatted price text supplied by the lambda converter.
  */
 data class ProductDto(val id: Long, val title: String, val priceInCents: Long, val displayPrice: String)
@@ -167,3 +159,25 @@ data class Person(val id: Long, val fullName: String)
  */
 @AutoMap(source = Person::class, bidirectional = true)
 data class PersonDto(val id: Long, val fullName: String)
+
+/**
+ * Example database projection that demonstrates auto-flatten mapping.
+ *
+ * [note] and [author] are marked with [Flatten], so the generated mapper can populate flat
+ * [Note.id], [Note.title], and [Note.authorName] constructor parameters from nested source
+ * properties.
+ */
+@AutoMap(target = Note::class)
+data class NoteWithAuthorDbModel(
+    @property:Flatten val note: NoteDbModel,
+    @property:Flatten val author: AuthorDbModel,
+)
+
+/** Source note entity used by [NoteWithAuthorDbModel]. */
+data class NoteDbModel(val id: Int, val title: String)
+
+/** Source author entity used by [NoteWithAuthorDbModel]. */
+data class AuthorDbModel(val authorName: String)
+
+/** Flat domain model produced from [NoteWithAuthorDbModel]. */
+data class Note(val id: Int, val title: String, val authorName: String)

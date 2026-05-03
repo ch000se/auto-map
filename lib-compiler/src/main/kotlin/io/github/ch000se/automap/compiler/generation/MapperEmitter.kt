@@ -19,15 +19,14 @@ import com.squareup.kotlinpoet.ksp.writeTo
  */
 internal class MapperEmitter(
     private val codeGenerator: CodeGenerator,
-    private val dependencyFiles: List<KSFile>,
     private val functionRenderer: MapperFunctionRenderer = MapperFunctionRenderer(),
 ) {
 
     /**
      * Emits [file] as a generated Kotlin source file.
      *
-     * The emitted file is marked aggregating because nested mapper availability depends on the
-     * complete AutoMap index collected for the processing round.
+     * Mapper files are isolating: each file depends on the source and target declarations used for
+     * that mapper. The registry documentation file is emitted separately as aggregating.
      */
     @Suppress("SpreadOperator")
     fun write(file: MapperFile) {
@@ -39,6 +38,6 @@ internal class MapperEmitter(
                     .forEach(::addFunction)
             }
             .build()
-        fileSpec.writeTo(codeGenerator, Dependencies(aggregating = true, *dependencyFiles.toTypedArray()))
+        fileSpec.writeTo(codeGenerator, Dependencies(aggregating = false, *file.dependencyFiles.toTypedArray()))
     }
 }

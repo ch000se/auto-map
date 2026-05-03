@@ -7,9 +7,8 @@ import io.github.ch000se.automap.compiler.MappingJob
  * Validates constraints that are specific to generated bidirectional mappings.
  *
  * Reverse mapper generation is only safe when every source-side annotation has an automatic inverse.
- * Rename annotations can be inverted, but custom converters and ignored fields cannot be reversed
- * without user-provided logic, so this validator rejects those combinations early with a clear KSP
- * error.
+ * Custom converters, renames, and ignored fields can make the reverse direction unsafe without
+ * user-provided logic, so this validator rejects those combinations early with a clear KSP error.
  */
 internal class BidirectionalMappingValidator {
 
@@ -29,13 +28,26 @@ internal class BidirectionalMappingValidator {
         for (property in sourceProps) {
             val name = property.simpleName.asString()
             val annotations = annotationsFor(name, property.annotations.toList(), sourceCtorParams)
-            val asymmetric = annotations.firstOrNull { it.isAnyOf("MapWith", "MapIgnore") }
+            val asymmetric = annotations.firstOrNull { it.isAnyOf("MapWith", "MapName", "MapIgnore", "Flatten") }
             if (asymmetric != null) {
                 throw MappingException(
-                    "@AutoMap(bidirectional = true) cannot be used because field '$name' " +
-                        "has @MapWith / @MapIgnore which has no automatic inverse. " +
-                        "Either remove bidirectional and write the reverse mapper manually, " +
-                        "or remove the @MapWith/@MapIgnore.",
+                    buildString {
+                        append("Cannot generate bidirectional mapper for ")
+                        append(job.sourceClass.simpleName.asString())
+                        append(" -> ")
+                        append(job.targetClass.simpleName.asString())
+                        append(".\n\n")
+                        append("Reason:\n")
+                        append("- @")
+                        append(asymmetric.shortName.asString())
+                        append(" on field \"")
+                        append(name)
+                        append("\" is one-way or may not be reversible\n\n")
+                        append("Fix:\n")
+                        append("1. Declare the reverse mapping explicitly with a separate @AutoMap\n")
+                        append("2. Provide a reverse converter\n")
+                        append("3. Remove bidirectional = true")
+                    },
                     job.annotatedSymbol,
                 )
             }

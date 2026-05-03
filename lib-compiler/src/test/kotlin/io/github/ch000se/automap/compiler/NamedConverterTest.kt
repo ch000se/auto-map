@@ -11,24 +11,21 @@ import org.junit.jupiter.api.Test
 class NamedConverterTest {
 
     @Test
-    fun `MapWith converter class is invoked`() {
+    fun `MapWith function is invoked`() {
         val src = SourceFile.kotlin(
             "Product.kt",
             """
             package demo
             import io.github.ch000se.automap.annotations.AutoMap
-            import io.github.ch000se.automap.annotations.AutoMapConverter
             import io.github.ch000se.automap.annotations.MapWith
 
-            object FormatCents : AutoMapConverter<Long, String> {
-                override fun convert(value: Long): String =
-                    "$" + (value / 100) + "." + (value % 100).toString().padStart(2, '0')
-            }
+            fun formatCents(value: Long): String =
+                "$" + (value / 100) + "." + (value % 100).toString().padStart(2, '0')
 
             @AutoMap(target = ProductDto::class)
             data class Product(
                 val id: Long,
-                @MapWith(FormatCents::class) val priceInCents: Long,
+                @MapWith("formatCents") val priceInCents: Long,
             )
 
             data class ProductDto(val id: Long, val priceInCents: String)

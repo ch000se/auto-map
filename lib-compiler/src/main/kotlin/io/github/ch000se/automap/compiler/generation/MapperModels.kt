@@ -1,6 +1,7 @@
 package io.github.ch000se.automap.compiler.generation
 
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSFile
 import com.google.devtools.ksp.symbol.KSType
 import com.squareup.kotlinpoet.CodeBlock
 
@@ -15,6 +16,7 @@ internal data class MapperFile(
     val packageName: String,
     val fileName: String,
     val functions: List<MapperFunction>,
+    val dependencyFiles: List<KSFile>,
 )
 
 /**
@@ -28,7 +30,16 @@ internal data class MapperFunction(
     val source: KSClassDeclaration,
     val target: KSClassDeclaration,
     val resolutions: List<Resolution>,
+    val generateListVariant: Boolean,
+    val functionName: String,
+    val jvmName: String?,
+    val visibility: MapperVisibility,
 )
+
+internal enum class MapperVisibility {
+    PUBLIC,
+    INTERNAL,
+}
 
 /**
  * Result of resolving one target constructor parameter.

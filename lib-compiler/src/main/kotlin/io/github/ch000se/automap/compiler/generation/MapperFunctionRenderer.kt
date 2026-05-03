@@ -26,10 +26,16 @@ internal class MapperFunctionRenderer {
         val context = RenderContext(
             sourceType = function.source.asStarProjectedType(),
             targetType = function.target.asStarProjectedType(),
-            funName = "to${function.target.simpleName.asString()}",
+            funName = function.functionName,
+            jvmName = function.jvmName,
+            visibility = function.visibility,
             resolutions = function.resolutions,
+            generateListVariant = function.generateListVariant,
         )
-        return listOf(context.singleMapper(), context.listMapper())
+        return listOfNotNull(
+            context.singleMapper(),
+            context.listMapper().takeIf { context.generateListVariant },
+        )
     }
 
     private fun RenderContext.singleMapper(): FunSpec {
@@ -45,7 +51,10 @@ internal class MapperFunctionRenderer {
             .add(")\n")
 
         return FunSpec.builder(funName)
-            .addModifiers(KModifier.PUBLIC)
+            .addModifiers(if (visibility == MapperVisibility.INTERNAL) KModifier.INTERNAL else KModifier.PUBLIC)
+            .apply {
+                jvmName?.let { addAnnotation(jvmNameAnnotation(it)) }
+            }
             .receiver(sourceType.toTypeName())
             .returns(targetType.toTypeName())
             .addParameters(lambdaParams.map { it.toParameterSpec() })
@@ -57,7 +66,10 @@ internal class MapperFunctionRenderer {
         val sourceTypeName = sourceType.toTypeName()
         val targetTypeName = targetType.toTypeName()
         return FunSpec.builder(listFunName)
-            .addModifiers(KModifier.PUBLIC)
+            .addModifiers(if (visibility == MapperVisibility.INTERNAL) KModifier.INTERNAL else KModifier.PUBLIC)
+            .apply {
+                jvmName?.let { addAnnotation(jvmNameAnnotation("${it}List")) }
+            }
             .receiver(List::class.asClassName().parameterizedBy(sourceTypeName))
             .returns(List::class.asClassName().parameterizedBy(targetTypeName))
             .addParameters(lambdaParams.map { it.toParameterSpec() })
@@ -82,11 +94,19 @@ internal class MapperFunctionRenderer {
         return ParameterSpec.builder(lambdaName, lambdaType).build()
     }
 
+    private fun jvmNameAnnotation(name: String): com.squareup.kotlinpoet.AnnotationSpec =
+        com.squareup.kotlinpoet.AnnotationSpec.builder(JvmName::class)
+            .addMember("%S", name)
+            .build()
+
     private data class RenderContext(
         val sourceType: KSType,
         val targetType: KSType,
         val funName: String,
+        val jvmName: String?,
+        val visibility: MapperVisibility,
         val resolutions: List<Resolution>,
+        val generateListVariant: Boolean,
     ) {
         val listFunName: String = "${funName}List"
         val lambdaParams: List<Resolution.LambdaConverter> =

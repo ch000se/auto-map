@@ -77,9 +77,10 @@ Source candidates:
   - fullName: kotlin.String
 
 Fix:
-  1. Add @MapName("displayName") on the matching source property
-  2. Add @MapWith(Converter::class) to provide custom logic
-  3. Change target type to match source
+  1. Add a source property named "displayName"
+  2. Add @MapName("displayName") on the matching source property
+  3. Add a default value in the target constructor
+  4. Use @MapWith for custom mapping
 ```
 
 ## Public API Surface
@@ -91,11 +92,19 @@ The compiler artifact exposes only the KSP entry points needed by service loadin
 
 The generator, mapping descriptors, and exceptions are internal implementation details.
 
+## Incremental KSP
+
+Regular mapper files are emitted as isolating outputs. Each generated mapper declares its source and
+target files, plus the AutoMap declaration files discovered in the same round so nested mapper
+availability cannot become stale during incremental builds. The documentation-only
+`AutoMapMappers.kt` file is aggregating because it lists every mapping pair discovered in the
+processing run.
+
 ## Debug Checklist
 
 1. Confirm generated files exist under `build/generated/ksp/<sourceSet>/kotlin`.
 2. Open the generated mapper and inspect the constructor call.
-3. Check that `@MapWith` converter classes implement `AutoMapConverter`.
+3. Check that `@MapWith` functions accept exactly one source value and return the target type.
 4. Check that target constructor parameters have defaults when a source field is ignored.
 5. Check that nested source types also declare `@AutoMap`.
 6. Run a clean build if generated sources look stale.
