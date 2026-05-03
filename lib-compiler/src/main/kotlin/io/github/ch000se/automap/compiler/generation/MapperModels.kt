@@ -11,12 +11,15 @@ import com.squareup.kotlinpoet.CodeBlock
  * @property packageName Package where the generated mapper file will be emitted.
  * @property fileName Kotlin source file name without the `.kt` suffix.
  * @property functions Mapper functions that should be emitted into the file.
+ * @property dependencyFiles KSP source files that should invalidate this mapper output.
+ * @property imports Function imports required by nested mapper calls from dependency packages.
  */
 internal data class MapperFile(
     val packageName: String,
     val fileName: String,
     val functions: List<MapperFunction>,
     val dependencyFiles: List<KSFile>,
+    val imports: List<MapperImport> = emptyList(),
 )
 
 /**
@@ -25,6 +28,10 @@ internal data class MapperFile(
  * @property source Source class used as the extension receiver.
  * @property target Target class constructed by the generated mapper.
  * @property resolutions Resolved target constructor arguments.
+ * @property generateListVariant Whether to emit a `List<Source>.toTargetList()` helper.
+ * @property functionName Kotlin extension function name.
+ * @property jvmName Optional `@JvmName` value.
+ * @property visibility Generated function visibility.
  */
 internal data class MapperFunction(
     val source: KSClassDeclaration,
@@ -36,10 +43,27 @@ internal data class MapperFunction(
     val visibility: MapperVisibility,
 )
 
+/**
+ * Visibility used by generated mapper extension functions.
+ */
 internal enum class MapperVisibility {
+    /** Emit a public top-level extension function. */
     PUBLIC,
+
+    /** Emit an internal top-level extension function. */
     INTERNAL,
 }
+
+/**
+ * File import required by a generated mapper body.
+ *
+ * @property packageName Package to import from.
+ * @property name Imported declaration simple name.
+ */
+internal data class MapperImport(
+    val packageName: String,
+    val name: String,
+)
 
 /**
  * Result of resolving one target constructor parameter.

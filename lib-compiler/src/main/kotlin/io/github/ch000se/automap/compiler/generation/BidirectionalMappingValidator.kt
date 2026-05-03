@@ -28,7 +28,7 @@ internal class BidirectionalMappingValidator {
         for (property in sourceProps) {
             val name = property.simpleName.asString()
             val annotations = annotationsFor(name, property.annotations.toList(), sourceCtorParams)
-            val asymmetric = annotations.firstOrNull { it.isAnyOf("MapWith", "MapName", "MapIgnore", "Flatten") }
+            val asymmetric = annotations.firstOrNull { it.isAnyOf("MapWith", "MapWithFn", "MapName", "MapIgnore", "Flatten") }
             if (asymmetric != null) {
                 throw MappingException(
                     buildString {

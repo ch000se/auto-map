@@ -10,6 +10,10 @@ private const val DEFAULT_MAX_DEPTH = 3
 
 /**
  * Finds compile-time flattened source property paths for target constructor parameters.
+ *
+ * The resolver only walks user-defined non-null composite classes, tracks visited types to avoid
+ * cycles, and separates valid matches from incompatible same-name candidates so diagnostics can be
+ * explicit.
  */
 internal class FlattenResolver(
     private val expressionResolver: ExpressionResolver,
@@ -78,7 +82,7 @@ internal class FlattenResolver(
                     type = nestedType,
                     depth = depth,
                 )
-                if (nested.annotations.any { it.isNamed("MapWith") }) {
+                if (nested.annotations.any { it.isNamed("MapWith") || it.isNamed("MapWithFn") }) {
                     mapWith += candidate
                 } else if (expressionResolver.canMapFlattened(nestedType, targetType)) {
                     valid += candidate
@@ -112,6 +116,15 @@ internal class FlattenResolver(
     }
 }
 
+/**
+ * Input for one flatten lookup.
+ *
+ * @property sourceProps Top-level readable source properties.
+ * @property annotationsByProperty Merged property and value-parameter annotations by source name.
+ * @property targetParamName Target constructor parameter being resolved.
+ * @property targetType Required target parameter type.
+ * @property flatten Whether global flatten lookup is enabled for this mapping.
+ */
 internal data class FlattenContext(
     val sourceProps: List<KSPropertyDeclaration>,
     val annotationsByProperty: Map<String, List<KSAnnotation>>,
@@ -120,6 +133,15 @@ internal data class FlattenContext(
     val flatten: Boolean,
 )
 
+/**
+ * One nested candidate discovered during flatten lookup.
+ *
+ * @property path KSP property declarations from top-level source property to leaf property.
+ * @property renderedPath Kotlin expression used in generated code, relative to the extension
+ *   receiver.
+ * @property type Leaf property type.
+ * @property depth Recursion depth at which the candidate was found.
+ */
 internal data class FlattenCandidate(
     val path: List<KSPropertyDeclaration>,
     val renderedPath: String,
@@ -127,6 +149,14 @@ internal data class FlattenCandidate(
     val depth: Int,
 )
 
+/**
+ * Result buckets for flatten lookup.
+ *
+ * @property valid Candidates whose names and types can map to the target parameter.
+ * @property incompatible Same-name candidates with incompatible types, used for diagnostics.
+ * @property mapWith Candidates that would require a nested converter annotation, which AutoMap
+ *   does not infer for flattened paths.
+ */
 internal data class FlattenLookup(
     val valid: List<FlattenCandidate>,
     val incompatible: List<FlattenCandidate>,

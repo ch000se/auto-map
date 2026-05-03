@@ -10,6 +10,8 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.symbol.KSType
+import io.github.ch000se.automap.compiler.generation.MapperRegistry
+import io.github.ch000se.automap.compiler.generation.RegisteredMapper
 
 internal const val ANNOTATIONS_PACKAGE = "io.github.ch000se.automap.annotations"
 internal const val AUTOMAP_FQN = "$ANNOTATIONS_PACKAGE.AutoMap"
@@ -27,6 +29,9 @@ internal const val AUTOMAP_FQN = "$ANNOTATIONS_PACKAGE.AutoMap"
  * @property bidirectional Whether the same declaration should also emit the reverse mapper.
  * @property flatten Whether nested composite source properties may be searched for target fields.
  * @property generateListVariant Whether `List<Source>.toTargetList()` should be emitted.
+ * @property functionName Optional custom Kotlin mapper function name from `@AutoMap`.
+ * @property jvmName Optional JVM name used for generated functions.
+ * @property visibility Requested visibility mode normalized from annotation/KSP options.
  * @property annotatedSymbol Original class declaration that carried the `@AutoMap` annotation.
  */
 internal data class MappingJob(
@@ -91,10 +96,12 @@ internal class AutoMapSymbolProcessor(
         val jobs = annotated.mapNotNull { normalizeOrReport(it, options) }
         val validJobs = removeDuplicateMappings(jobs)
         val collisionFreeJobs = removeFunctionCollisions(validJobs)
-        val autoMapIndex = buildAutoMapIndex(collisionFreeJobs)
+        val currentMappings = buildRegisteredMappings(collisionFreeJobs)
+        val externalMappings = MapperMetadataReader(logger, resolver).readFromClasspath()
+        val allMappings = removeDuplicateRegisteredMappings(currentMappings + externalMappings, collisionFreeJobs)
         val dependencyFiles = collisionFreeJobs.mapNotNull { it.annotatedSymbol.containingFile }.distinct()
 
-        val generator = MapperGenerator(codeGenerator, resolver, autoMapIndex, options, dependencyFiles)
+        val generator = MapperGenerator(codeGenerator, resolver, MapperRegistry(allMappings), options, dependencyFiles)
         for (job in collisionFreeJobs) {
             try {
                 generator.generate(job)
@@ -108,6 +115,11 @@ internal class AutoMapSymbolProcessor(
             } catch (e: MappingException) {
                 logger.error(e.message ?: "AutoMap error", e.symbol ?: collisionFreeJobs.firstOrNull()?.annotatedSymbol)
             }
+        }
+        try {
+            MapperMetadataEmitter(codeGenerator).write(currentMappings, collisionFreeJobs)
+        } catch (e: MappingException) {
+            logger.error(e.message ?: "AutoMap error", e.symbol ?: collisionFreeJobs.firstOrNull()?.annotatedSymbol)
         }
         return emptyList()
     }
@@ -213,18 +225,58 @@ internal class AutoMapSymbolProcessor(
         }
     }
 
-    private fun buildAutoMapIndex(jobs: List<MappingJob>): Map<String, Set<String>> {
-        val pairs = buildList {
-            for (job in jobs) {
-                val sourceFqn = job.sourceClass.qualifiedName?.asString()
-                val targetFqn = job.targetClass.qualifiedName?.asString()
-                if (sourceFqn != null && targetFqn != null) {
-                    add(sourceFqn to targetFqn)
-                    if (job.bidirectional) add(targetFqn to sourceFqn)
+    private fun buildRegisteredMappings(jobs: List<MappingJob>): List<RegisteredMapper> =
+        jobs.flatMap { job ->
+            buildList {
+                add(job.toRegisteredMapper(job.sourceClass, job.targetClass, job.effectiveFunctionName()))
+                if (job.bidirectional) {
+                    add(job.toRegisteredMapper(job.targetClass, job.sourceClass, "to${job.sourceClass.simpleName.asString()}"))
                 }
             }
         }
-        return pairs.groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
+
+    private fun MappingJob.toRegisteredMapper(
+        source: KSClassDeclaration,
+        target: KSClassDeclaration,
+        functionName: String,
+    ): RegisteredMapper {
+        val functionPackage = source.packageName.asString()
+        return RegisteredMapper(
+            sourceFqn = source.fqn(),
+            targetFqn = target.fqn(),
+            functionFqn = "$functionPackage.$functionName",
+            functionName = functionName,
+            sourcePackage = source.packageName.asString(),
+            targetPackage = target.packageName.asString(),
+        )
+    }
+
+    private fun removeDuplicateRegisteredMappings(
+        mappings: List<RegisteredMapper>,
+        jobs: List<MappingJob>,
+    ): List<RegisteredMapper> {
+        val uniqueMappings = mappings.distinctBy {
+            listOf(it.sourceFqn, it.targetFqn, it.functionFqn, it.functionName)
+        }
+        val duplicates = uniqueMappings.groupBy { it.sourceFqn to it.targetFqn }.filterValues { it.size > 1 }
+        for ((pair, candidates) in duplicates) {
+            logger.error(
+                buildString {
+                    append("Duplicate AutoMap mapping found.\n\n")
+                    append("Mapping:\n")
+                    append("- ").append(pair.first).append(" -> ").append(pair.second).append("\n\n")
+                    append("Candidates:\n")
+                    candidates.forEach { append("- ").append(it.functionFqn).append("\n") }
+                    append("\nFix:\n")
+                    append("1. Remove one mapping\n")
+                    append("2. Use explicit @MapWithFn on the field\n")
+                    append("3. Rename or disable one generated mapper")
+                },
+                jobs.firstOrNull()?.annotatedSymbol,
+            )
+        }
+        val duplicatePairs = duplicates.keys
+        return uniqueMappings.filterNot { (it.sourceFqn to it.targetFqn) in duplicatePairs }
     }
 
     private fun normalize(decl: KSClassDeclaration, options: AutoMapOptions): MappingJob? {

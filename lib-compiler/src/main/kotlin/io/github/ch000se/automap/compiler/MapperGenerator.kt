@@ -4,6 +4,7 @@ import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.KSFile
 import io.github.ch000se.automap.compiler.generation.MapperEmitter
+import io.github.ch000se.automap.compiler.generation.MapperRegistry
 import io.github.ch000se.automap.compiler.generation.MapperResolver
 
 /**
@@ -15,19 +16,19 @@ import io.github.ch000se.automap.compiler.generation.MapperResolver
  * generator implementation.
  *
  * @property codeGenerator KSP file writer used by the emitter to create generated mapper sources.
- * @property autoMapIndex Lookup from source FQN to known target FQNs used for nested mapper calls.
+ * @property mapperRegistry Lookup of current-module and dependency-module mapper functions.
  * @property dependencyFiles Source files that can affect generated mapper output.
  */
 internal class MapperGenerator(
     codeGenerator: CodeGenerator,
     kspResolver: Resolver,
-    autoMapIndex: Map<String, Set<String>>,
+    mapperRegistry: MapperRegistry,
     options: AutoMapOptions,
     dependencyFiles: List<KSFile>,
 ) {
     private val resolver = MapperResolver(
         kspResolver = kspResolver,
-        autoMapIndex = autoMapIndex,
+        mapperRegistry = mapperRegistry,
         options = options,
         knownMappingFiles = dependencyFiles,
     )

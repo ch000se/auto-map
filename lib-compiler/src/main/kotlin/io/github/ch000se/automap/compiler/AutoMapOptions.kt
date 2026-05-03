@@ -2,6 +2,20 @@ package io.github.ch000se.automap.compiler
 
 import com.google.devtools.ksp.symbol.KSAnnotated
 
+/**
+ * Parsed global AutoMap KSP options.
+ *
+ * Annotation arguments can override these defaults when the user explicitly sets an annotation
+ * parameter. Values are read once per KSP processing invocation from `SymbolProcessorEnvironment`.
+ *
+ * @property flatten Global default for auto-flatten lookup.
+ * @property generateListVariant Global default for generated list extension functions.
+ * @property allowNarrowing Whether explicitly configured primitive narrowing conversions are
+ *   allowed.
+ * @property generateRegistryDoc Whether to emit the documentation-only `AutoMapMappers.kt` file.
+ * @property defaultVisibility Visibility policy used when an annotation leaves visibility as
+ *   `AUTO`.
+ */
 internal data class AutoMapOptions(
     val flatten: Boolean = false,
     val generateListVariant: Boolean = true,
@@ -10,6 +24,9 @@ internal data class AutoMapOptions(
     val defaultVisibility: DefaultVisibility = DefaultVisibility.AUTO,
 ) {
     companion object {
+        /**
+         * Parses raw KSP options and reports invalid values through [MappingException].
+         */
         fun parse(raw: Map<String, String>, symbol: KSAnnotated? = null): AutoMapOptions =
             AutoMapOptions(
                 flatten = raw.booleanOption("automap.flatten", default = false, symbol),
@@ -21,9 +38,17 @@ internal data class AutoMapOptions(
     }
 }
 
+/**
+ * Internal representation of the `automap.defaultVisibility` KSP option.
+ */
 internal enum class DefaultVisibility {
+    /** Infer visibility from source and target declarations. */
     AUTO,
+
+    /** Generate public mapper functions by default. */
     PUBLIC,
+
+    /** Generate internal mapper functions by default. */
     INTERNAL,
 }
 

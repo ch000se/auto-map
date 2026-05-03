@@ -24,6 +24,7 @@ registry.
 - [Comparison](#comparison)
 - [Requirements](#requirements)
 - [KSP Options](#ksp-options)
+- [Multi-module Projects](#multi-module-projects)
 - [Limitations](#limitations)
 - [Platform Support](#platform-support)
 - [Java Interop](#java-interop)
@@ -142,12 +143,12 @@ data class UserDto(val address: AddressDto)
 // address = address.toAddressDto()
 ```
 
-For custom one-field conversion, reference a function directly:
+For custom one-field conversion, reference a function by name:
 
 ```kotlin
 @AutoMap(Note::class)
 data class NoteDbModel(
-    @MapWith("toContentItems")
+    @MapWithFn("toContentItems")
     val content: List<ContentItemDbModel>,
 )
 
@@ -157,6 +158,31 @@ fun toContentItems(value: List<ContentItemDbModel>): List<ContentItem> =
 
 Target constructor defaults are respected. If a target parameter has a default value and no source
 field maps to it, AutoMap omits that constructor argument.
+
+Use `@MapName` on either side when names differ. On a source-side declaration, the value is the
+target name. On a target-side declaration, the value is the source name:
+
+```kotlin
+data class BodyPart(
+    val name: String,
+    val isActive: Boolean,
+)
+
+@AutoMap(source = BodyPart::class)
+data class BodyPartDto(
+    val name: String = "",
+    @MapName("isActive") val active: Boolean = false,
+)
+
+// Generated:
+// fun BodyPart.toBodyPartDto(): BodyPartDto = BodyPartDto(
+//     name = name,
+//     active = isActive,
+// )
+```
+
+For clean architecture, prefer this target-side style on DTO or data-layer classes so domain models
+do not import DTO types.
 
 ## Auto-flatten Mapping
 
@@ -196,9 +222,9 @@ add `@MapName` to explicitly select the source field.
 | [Basic mapping](docs/usage.md#1-basic-mapping) | `@AutoMap(target = ...)` | Generates `Source.toTarget()` and `List<Source>.toTargetList()` extension functions. |
 | [Target-side declaration](docs/usage.md#2-target-side-declaration) | `@AutoMap(source = ...)` | Lets DTO or data-layer classes declare mappings without importing them into the domain layer. |
 | [Bidirectional mapping](docs/usage.md#3-bidirectional-mapping) | `bidirectional = true` | Generates both directions from one annotation when the mapping is symmetric. |
-| [Field rename](docs/usage.md#4-renamed-fields) | `@MapName` | Maps a source property to a target constructor parameter with a different name. |
+| [Field rename](docs/usage.md#4-renamed-fields) | `@MapName` | Maps a property to a differently named property on the opposite side. |
 | [Ignored field](docs/usage.md#5-ignored-fields) | `@MapIgnore` | Omits a source property; the target parameter must provide a default value. |
-| [Function converter](docs/usage.md#function-converter) | `@MapWith("functionName")` | Calls custom conversion logic for one field. |
+| [Function converter](docs/usage.md#function-converter) | `@MapWithFn("functionName")` | Calls custom conversion logic for one field. |
 | [Lambda converter](docs/usage.md#lambda-parameter) | `@MapWith` | Adds a mapper lambda parameter when conversion depends on runtime context. |
 | [Nested mapping](docs/usage.md#7-nested-mapping) | `@AutoMap` on nested types | Calls generated nested mapper functions automatically. |
 | [Collection mapping](docs/usage.md#8-collections) | `List`, `Set`, `Map` | Maps list/set elements and map values when element mappings are known. |
@@ -271,6 +297,48 @@ AutoMap also emits `AutoMapMappers.kt`, an internal documentation-only generated
 mapping pairs and generated function names. Disable it with
 `arg("automap.generateRegistryDoc", "false")`.
 
+## Multi-module Projects
+
+AutoMap supports nested mapper discovery across Gradle modules without runtime reflection. Each
+module that declares `@AutoMap` should apply KSP and depend on both artifacts:
+
+```kotlin
+dependencies {
+    implementation("io.github.ch000se:automap-core:<automap-version>")
+    ksp("io.github.ch000se:automap-compiler:<automap-version>")
+}
+```
+
+For every generated mapper, AutoMap emits compile-time metadata into:
+
+```text
+META-INF/automap/mappings
+```
+
+and a generated metadata source under `io.github.ch000se.automap.generated`. Downstream KSP runs
+read that metadata from dependency modules and can automatically call nested mappers:
+
+```kotlin
+// dependency module
+data class Note(val id: Int)
+
+@AutoMap(source = Note::class)
+data class NoteDto(val id: Int = 0)
+
+// downstream module
+data class ScreenModel(val note: Note)
+
+@AutoMap(source = ScreenModel::class)
+data class ScreenDto(val note: NoteDto)
+
+// Generated downstream:
+// import domain.toNoteDto
+// note = note.toNoteDto()
+```
+
+If two dependency modules expose the same `Source -> Target` mapping, AutoMap fails at compile time
+and asks you to remove one mapping or use an explicit `@MapWithFn` converter for that field.
+
 ## Limitations
 
 AutoMap currently supports concrete non-generic Kotlin classes with public primary constructors.
@@ -279,14 +347,14 @@ write that mapper manually.
 
 AutoMap does not support secondary constructors, factory methods, JavaBean-only getters, sealed
 polymorphic dispatch, or runtime mapper lookup. Nullable source values are never force-unwrapped:
-`String? -> String` requires `@MapWith` or a manual/default strategy.
+`String? -> String` requires `@MapWithFn`, lambda `@MapWith`, or a manual/default strategy.
 
-Nested auto-mapping uses mappings discovered in the current KSP processing run. AutoMap does not
-scan dependency artifacts for generated mapper metadata, so cross-module nested mapper discovery may
-require an explicit `@MapWith`.
+Cross-module nested mapper discovery requires dependency modules to be compiled with AutoMap
+metadata. If you depend on a module built by an older AutoMap version that does not emit metadata,
+use `@MapWithFn` or rebuild that module with a current AutoMap compiler.
 
 Automatic `toString()` conversion is intentionally limited to primitive/enum-like values. AutoMap
-does not convert arbitrary objects or collections to `String` implicitly; use `@MapWith` when that
+does not convert arbitrary objects or collections to `String` implicitly; use `@MapWithFn` when that
 string format is part of your mapping contract.
 
 ## Platform Support
@@ -312,7 +380,7 @@ current API surface:
 
 - direct source-side mapping;
 - target-side and bidirectional mapping;
-- `@MapName`, `@MapIgnore`, `@MapWith("functionName")`, and lambda `@MapWith`;
+- `@MapName`, `@MapIgnore`, `@MapWithFn("functionName")`, legacy `@MapWith("functionName")`, and lambda `@MapWith`;
 - nested object and list element mapping;
 - `@Flatten` projection mapping.
 

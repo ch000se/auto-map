@@ -19,14 +19,18 @@ private const val MAP_FQN = "kotlin.collections.Map"
  * returns KotlinPoet [CodeBlock] values so identifier escaping and formatting stay centralized in
  * the code generation layer.
  *
- * @property autoMapIndex Lookup from source type FQN to known target type FQNs for nested mapper
- *   discovery.
+ * @property mapperRegistry Lookup of known generated mapper functions, including dependency-module
+ *   metadata.
  */
 @Suppress("TooManyFunctions")
 internal class ExpressionResolver(
-    private val autoMapIndex: Map<String, Set<String>>,
+    private val mapperRegistry: MapperRegistry,
     private val allowNarrowing: Boolean = false,
 ) {
+    private val mapperImports = linkedSetOf<MapperImport>()
+
+    fun consumeImports(): List<MapperImport> =
+        mapperImports.toList().also { mapperImports.clear() }
 
     /**
      * Builds an expression that maps [ExpressionContext.propName] from source type to target type.
@@ -79,12 +83,12 @@ internal class ExpressionResolver(
         valueExpression: CodeBlock,
     ): CodeBlock? {
         if (sourceType.isMarkedNullable && !targetType.isMarkedNullable) return null
-        if (!hasAutoMap(sourceType.fqn(), targetType.fqn())) return null
-        val call = "to${targetType.declaration.simpleName.asString()}"
+        val mapper = mapperRegistry.find(sourceType.fqn(), targetType.fqn()) ?: return null
+        mapperImports += MapperImport(mapper.functionPackage, mapper.functionName)
         return if (sourceType.isMarkedNullable) {
-            CodeBlock.of("%L?.%N()", valueExpression, call)
+            CodeBlock.of("%L?.%M()", valueExpression, mapper.memberName())
         } else {
-            CodeBlock.of("%L.%N()", valueExpression, call)
+            CodeBlock.of("%L.%M()", valueExpression, mapper.memberName())
         }
     }
 
@@ -146,9 +150,6 @@ internal class ExpressionResolver(
         val nested = nestedExpression(sourceElement, targetElement, valueExpression)
         return nested?.let { ElementExpression(it, isIdentity = false) }
     }
-
-    private fun hasAutoMap(sourceFqn: String, targetFqn: String): Boolean =
-        autoMapIndex[sourceFqn].orEmpty().contains(targetFqn)
 
     private fun typeArgsEqual(a: KSType, b: KSType): Boolean {
         return a.arguments.size == b.arguments.size &&
@@ -213,7 +214,7 @@ internal class ExpressionResolver(
                     append("AutoMap does not generate \"!!\".\n\n")
                     append("Fix:\n")
                     append("1. Make target field nullable: ").append(context.targetType.render()).append("?\n")
-                    append("2. Add @MapWith(\"converter\") to handle null explicitly\n")
+                    append("2. Add @MapWithFn(\"converter\") to handle null explicitly\n")
                     append("3. Add a default value strategy")
                 },
                 context.sourceSymbol ?: context.source,

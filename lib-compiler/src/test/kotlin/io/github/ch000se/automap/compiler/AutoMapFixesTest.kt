@@ -155,8 +155,8 @@ class AutoMapFixesTest {
         )
         val r = CompilationHelper.compile(src).also { it.assertError() }
 
-        r.assertErrorContains("Invalid @MapWith converter")
-        r.assertErrorContains("accepting kotlin.Long")
+        r.assertErrorContains("Invalid converter for field \"amount\"")
+        r.assertErrorContains("(kotlin.Long) -> kotlin.String")
     }
 
     @Test
@@ -178,8 +178,8 @@ class AutoMapFixesTest {
         )
         val r = CompilationHelper.compile(src).also { it.assertError() }
 
-        r.assertErrorContains("Invalid @MapWith converter")
-        r.assertErrorContains("returning kotlin.String")
+        r.assertErrorContains("Invalid converter for field \"amount\"")
+        r.assertErrorContains("(kotlin.Long) -> kotlin.String")
     }
 
     @Test

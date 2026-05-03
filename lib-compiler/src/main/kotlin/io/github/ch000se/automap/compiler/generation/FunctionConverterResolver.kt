@@ -8,7 +8,8 @@ import com.google.devtools.ksp.symbol.KSType
 import io.github.ch000se.automap.compiler.MappingException
 
 /**
- * Resolves and validates function-based `@MapWith` converters.
+ * Resolves and validates named converter functions used by `@MapWithFn` and legacy string
+ * `@MapWith`.
  */
 internal class FunctionConverterResolver(
     private val resolver: Resolver,
@@ -27,12 +28,12 @@ internal class FunctionConverterResolver(
         val found = candidates.firstOrNull()
         throw MappingException(
             buildString {
-                append("Invalid @MapWith converter for field \"")
+                append("Invalid converter for field \"")
                     .append(context.fieldName)
                     .append("\".\n\n")
-                append("Expected:\n")
-                append("- function accepting ").append(context.sourceType.render()).append("\n")
-                append("- returning ").append(context.targetType.render()).append("\n\n")
+                append("Expected converter:\n")
+                append("- (").append(context.sourceType.render()).append(") -> ")
+                    .append(context.targetType.render()).append("\n\n")
                 append("Found:\n")
                 if (found == null) {
                     append("- no function named ").append(context.functionRef).append("\n\n")
@@ -41,8 +42,8 @@ internal class FunctionConverterResolver(
                 }
                 append("Fix:\n")
                 append("1. Change converter parameter type\n")
-                append("2. Change converter return type\n")
-                append("3. Remove @MapWith if automatic mapping is possible")
+                append("2. Use another converter function\n")
+                append("3. Remove @").append(context.annotationName).append(" if automatic mapping is possible")
             },
             context.property,
         )
@@ -101,6 +102,17 @@ internal class FunctionConverterResolver(
     }
 }
 
+/**
+ * Input required to resolve a named converter function for one selected source property.
+ *
+ * @property source Source class that owns [property].
+ * @property property Source property annotated with `@MapWithFn` or legacy string `@MapWith`.
+ * @property fieldName Target constructor parameter name used in diagnostics.
+ * @property functionRef User-provided converter reference.
+ * @property sourceType Resolved type passed into the converter.
+ * @property targetType Required converter return type.
+ * @property annotationName Annotation name used in diagnostics.
+ */
 internal data class FunctionConverterContext(
     val source: KSClassDeclaration,
     val property: KSPropertyDeclaration,
@@ -108,8 +120,14 @@ internal data class FunctionConverterContext(
     val functionRef: String,
     val sourceType: KSType,
     val targetType: KSType,
+    val annotationName: String,
 )
 
+/**
+ * Resolved converter call target.
+ *
+ * @property reference Kotlin expression used as the function callee in generated code.
+ */
 internal data class FunctionConverter(
     val reference: String,
 )

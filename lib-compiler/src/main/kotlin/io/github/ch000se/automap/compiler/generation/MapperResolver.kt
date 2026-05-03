@@ -18,8 +18,8 @@ import io.github.ch000se.automap.compiler.MappingJob
  * Resolves a normalized [MappingJob] into file and function metadata ready for KotlinPoet emission.
  *
  * This class owns constructor-parameter resolution: source property matching, default-value
- * omission, `@MapIgnore`, `@MapName`, and `@MapWith` handling. Type-to-expression decisions are
- * delegated to [ExpressionResolver], and bidirectional safety checks are delegated to
+ * omission, `@MapIgnore`, `@MapName`, `@MapWithFn`, and `@MapWith` handling.
+ * Type-to-expression decisions are delegated to [ExpressionResolver], and bidirectional safety checks are delegated to
  * [BidirectionalMappingValidator].
  *
  * @property validator Checks constraints that only apply to bidirectional mapper generation.
@@ -27,11 +27,11 @@ import io.github.ch000se.automap.compiler.MappingJob
  */
 internal class MapperResolver(
     kspResolver: Resolver,
-    autoMapIndex: Map<String, Set<String>>,
+    mapperRegistry: MapperRegistry,
     private val options: AutoMapOptions,
     private val knownMappingFiles: List<KSFile>,
     private val validator: BidirectionalMappingValidator = BidirectionalMappingValidator(),
-    private val expressionResolver: ExpressionResolver = ExpressionResolver(autoMapIndex, options.allowNarrowing),
+    private val expressionResolver: ExpressionResolver = ExpressionResolver(mapperRegistry, options.allowNarrowing),
     private val flattenResolver: FlattenResolver = FlattenResolver(expressionResolver),
     private val functionConverterResolver: FunctionConverterResolver = FunctionConverterResolver(kspResolver),
 ) {
@@ -73,6 +73,7 @@ internal class MapperResolver(
                 job.sourceClass.containingFile,
                 job.targetClass.containingFile,
             ).plus(knownMappingFiles).distinct(),
+            imports = expressionResolver.consumeImports(),
         )
     }
 
@@ -132,11 +133,17 @@ internal class MapperResolver(
             target = target,
             sourceProps = sourceProperties(source),
             sourceCtorParams = source.primaryConstructor?.parameters.orEmpty(),
+            targetProps = sourceProperties(target),
+            targetCtorParams = target.primaryConstructor?.parameters.orEmpty(),
             inverseRenames = inverseRenames,
             flatten = flatten,
             annotationsByProperty = annotationsByProperty(
                 sourceProperties(source),
                 source.primaryConstructor?.parameters.orEmpty(),
+            ),
+            targetAnnotationsByProperty = annotationsByProperty(
+                sourceProperties(target),
+                target.primaryConstructor?.parameters.orEmpty(),
             ),
         )
         return ctor.parameters.mapNotNull { resolveParam(context, it) }
@@ -152,8 +159,17 @@ internal class MapperResolver(
             return omitIgnoredOrError(context, targetParam, matched.propertyName)
         }
 
+        val mapWithFn = matched.annotations.firstOrNull { it.isNamed("MapWithFn") }
         val mapWith = matched.annotations.firstOrNull { it.isNamed("MapWith") }
-        return if (mapWith != null) {
+        return if (mapWithFn != null) {
+            namedConverterResolution(
+                annotation = mapWithFn,
+                annotationName = "MapWithFn",
+                matched = matched,
+                targetParamName = targetParamName,
+                targetType = targetType,
+            )
+        } else if (mapWith != null) {
             mapWithResolution(mapWith, matched, targetParamName, targetType)
         } else {
             val sourceType = matched.property.type.resolve()
@@ -178,6 +194,13 @@ internal class MapperResolver(
         targetParamName: String,
         targetType: KSType,
     ): MatchedSource? {
+        val targetMapName = context.targetAnnotationsByProperty[targetParamName]
+            .orEmpty()
+            .firstValueOf("MapName")
+        if (targetMapName != null) {
+            return findTargetSideMapNameMatch(context, targetParamName, targetMapName)
+        }
+
         val inverse = context.inverseRenames[targetParamName]
         val inverseMatch = inverse?.let { context.sourceProps.firstOrNull { p -> p.name == it } }
         val mapNameMatches = context.sourceProps.filter { property ->
@@ -227,6 +250,49 @@ internal class MapperResolver(
         return null
     }
 
+    private fun findTargetSideMapNameMatch(
+        context: ResolveContext,
+        targetParamName: String,
+        sourcePropertyName: String,
+    ): MatchedSource {
+        val targetSymbol = context.targetProps.firstOrNull { it.name == targetParamName }
+            ?: context.targetCtorParams.firstOrNull { it.name?.asString() == targetParamName }
+            ?: context.target
+        val selectedSource = context.sourceProps.firstOrNull { it.name == sourcePropertyName }
+            ?: errorMissingTargetSideMapNameSource(context, targetParamName, sourcePropertyName, targetSymbol)
+
+        val selectedSourceTargetName = context.annotationsByProperty[selectedSource.name]
+            .orEmpty()
+            .firstValueOf("MapName")
+        if (selectedSourceTargetName != null && selectedSourceTargetName != targetParamName) {
+            errorConflictingMapNameDeclarations(
+                context = context,
+                targetParamName = targetParamName,
+                targetSourceName = sourcePropertyName,
+                sourceProperty = selectedSource,
+                sourceTargetName = selectedSourceTargetName,
+                symbol = targetSymbol,
+            )
+        }
+
+        val competingSourceMapping = context.sourceProps.firstOrNull { property ->
+            property.name != selectedSource.name &&
+                context.annotationsByProperty[property.name].orEmpty().firstValueOf("MapName") == targetParamName
+        }
+        if (competingSourceMapping != null) {
+            errorConflictingMapNameDeclarations(
+                context = context,
+                targetParamName = targetParamName,
+                targetSourceName = sourcePropertyName,
+                sourceProperty = competingSourceMapping,
+                sourceTargetName = targetParamName,
+                symbol = targetSymbol,
+            )
+        }
+
+        return selectedSource.toMatched(context)
+    }
+
     private fun omitOrError(
         context: ResolveContext,
         targetParam: KSValueParameter,
@@ -274,22 +340,43 @@ internal class MapperResolver(
                 targetType = targetType,
             )
         } else {
-            val converter = functionConverterResolver.resolve(
-                FunctionConverterContext(
-                    source = matched.owner,
-                    property = matched.property,
-                    fieldName = targetParamName,
-                    functionRef = functionRef,
-                    sourceType = sourceType,
-                    targetType = targetType,
-                ),
-            )
-            registerFunctionConverter(sourceType, targetType, converter.reference, matched.property)
-            Resolution.Plain(
-                targetParamName,
-                CodeBlock.of("%L(%L)", converter.reference, matched.expression),
+            namedConverterResolution(
+                annotation = mapWith,
+                annotationName = "MapWith",
+                matched = matched,
+                targetParamName = targetParamName,
+                targetType = targetType,
+                functionRef = functionRef,
             )
         }
+    }
+
+    private fun namedConverterResolution(
+        annotation: KSAnnotation,
+        annotationName: String,
+        matched: MatchedSource,
+        targetParamName: String,
+        targetType: KSType,
+        functionRef: String = annotation.functionReference()
+            ?: throw MappingException("@$annotationName requires a converter function name", matched.property),
+    ): Resolution {
+        val sourceType = matched.property.type.resolve()
+        val converter = functionConverterResolver.resolve(
+            FunctionConverterContext(
+                source = matched.owner,
+                property = matched.property,
+                fieldName = targetParamName,
+                functionRef = functionRef,
+                sourceType = sourceType,
+                targetType = targetType,
+                annotationName = annotationName,
+            ),
+        )
+        registerFunctionConverter(sourceType, targetType, converter.reference, matched.property)
+        return Resolution.Plain(
+            targetParamName,
+            CodeBlock.of("%L(%L)", converter.reference, matched.expression),
+        )
     }
 
     private fun errorNoMapping(
@@ -345,7 +432,9 @@ internal class MapperResolver(
                 append(flattened.renderCandidates()).append("\n\n")
                 append("Fix:\n")
                 append("1. Add @MapName(\"").append(targetParamName)
-                    .append("\") to the exact source property you want\n")
+                    .append("\") to the exact source property or @MapName(\"")
+                    .append(topLevel.name)
+                    .append("\") to the target property\n")
                 append("2. Remove @Flatten / disable flatten = true")
             },
             source,
@@ -366,7 +455,7 @@ internal class MapperResolver(
                 append(candidates.renderCandidates()).append("\n\n")
                 append("Fix:\n")
                 append("1. Add @MapName(\"").append(targetParamName)
-                    .append("\") to the correct source property\n")
+                    .append("\") to the correct source property or target-side @MapName(\"sourceName\")\n")
                 append("2. Disable flatten = true and use @Flatten only on the intended property\n")
                 append("3. Rename one of the fields")
             },
@@ -401,11 +490,11 @@ internal class MapperResolver(
     ): Nothing {
         throw MappingException(
             buildString {
-                append("Cannot apply @MapWith to inferred flattened path \"")
+                append("Cannot apply converter annotation to inferred flattened path \"")
                     .append(candidate.renderedPath)
                     .append("\".\n\n")
-                append("For custom conversion, expose a top-level property annotated with @MapWith ")
-                append("or use explicit mapping support if available.")
+                append("For custom conversion, expose a top-level property annotated with @MapWithFn ")
+                append("or lambda @MapWith.")
             },
             source,
         )
@@ -434,6 +523,66 @@ internal class MapperResolver(
         )
     }
 
+    private fun errorMissingTargetSideMapNameSource(
+        context: ResolveContext,
+        targetParamName: String,
+        sourcePropertyName: String,
+        symbol: com.google.devtools.ksp.symbol.KSAnnotated,
+    ): Nothing {
+        val available = context.sourceProps.joinToString("\n") { "- ${it.name}" }
+        val suggestion = nearestName(sourcePropertyName, context.sourceProps.map { it.name })
+        throw MappingException(
+            buildString {
+                append("@MapName(\"").append(sourcePropertyName).append("\") on ")
+                    .append(context.target.simpleName.asString()).append(".").append(targetParamName)
+                    .append(" references missing source property.\n\n")
+                append("Source class:\n")
+                append("- ").append(context.source.simpleName.asString()).append("\n\n")
+                append("Available source properties:\n")
+                append(available).append("\n\n")
+                append("Fix:\n")
+                append("1. Change @MapName(\"").append(sourcePropertyName).append("\")")
+                if (suggestion != null) {
+                    append(" to @MapName(\"").append(suggestion).append("\")")
+                } else {
+                    append(" to an existing source property name")
+                }
+            },
+            symbol,
+        )
+    }
+
+    private fun errorConflictingMapNameDeclarations(
+        context: ResolveContext,
+        targetParamName: String,
+        targetSourceName: String,
+        sourceProperty: KSPropertyDeclaration,
+        sourceTargetName: String,
+        symbol: com.google.devtools.ksp.symbol.KSAnnotated,
+    ): Nothing {
+        throw MappingException(
+            buildString {
+                append("Conflicting @MapName declarations for target field \"")
+                    .append(targetParamName)
+                    .append("\".\n\n")
+                append("Target-side annotation:\n")
+                append("- ").append(context.target.simpleName.asString()).append(".").append(targetParamName)
+                    .append(" maps from ")
+                    .append(context.source.simpleName.asString()).append(".").append(targetSourceName)
+                    .append("\n\n")
+                append("Source-side annotation:\n")
+                append("- ").append(context.source.simpleName.asString()).append(".").append(sourceProperty.name)
+                    .append(" maps to ")
+                    .append(context.target.simpleName.asString()).append(".").append(sourceTargetName)
+                    .append("\n\n")
+                append("Fix:\n")
+                append("1. Keep only one @MapName\n")
+                append("2. Make both annotations describe the same pair")
+            },
+            symbol,
+        )
+    }
+
     private fun registerFunctionConverter(
         sourceType: KSType,
         targetType: KSType,
@@ -455,7 +604,7 @@ internal class MapperResolver(
                     append("- ").append(reference).append("\n\n")
                     append("Fix:\n")
                     append("1. Remove one converter\n")
-                    append("2. Use @MapWith on the field to select explicitly")
+                    append("2. Use @MapWithFn on the field to select explicitly")
                 },
                 symbol,
             )
@@ -545,14 +694,43 @@ internal class MapperResolver(
         }
     }
 
+    private fun nearestName(name: String, candidates: List<String>): String? =
+        candidates.minByOrNull { levenshtein(name, it) }
+            ?.takeIf { levenshtein(name, it) <= 2 }
+
+    private fun levenshtein(left: String, right: String): Int {
+        if (left == right) return 0
+        if (left.isEmpty()) return right.length
+        if (right.isEmpty()) return left.length
+
+        var previous = IntArray(right.length + 1) { it }
+        var current = IntArray(right.length + 1)
+        for (i in left.indices) {
+            current[0] = i + 1
+            for (j in right.indices) {
+                val substitution = previous[j] + if (left[i] == right[j]) 0 else 1
+                val insertion = current[j] + 1
+                val deletion = previous[j + 1] + 1
+                current[j + 1] = minOf(substitution, insertion, deletion)
+            }
+            val nextPrevious = previous
+            previous = current
+            current = nextPrevious
+        }
+        return previous[right.length]
+    }
+
     private data class ResolveContext(
         val source: KSClassDeclaration,
         val target: KSClassDeclaration,
         val sourceProps: List<KSPropertyDeclaration>,
         val sourceCtorParams: List<KSValueParameter>,
+        val targetProps: List<KSPropertyDeclaration>,
+        val targetCtorParams: List<KSValueParameter>,
         val inverseRenames: Map<String, String>,
         val flatten: Boolean,
         val annotationsByProperty: Map<String, List<KSAnnotation>>,
+        val targetAnnotationsByProperty: Map<String, List<KSAnnotation>>,
     )
 
     private data class MatchedSource(
@@ -577,6 +755,7 @@ internal class MapperResolver(
     ): List<KSAnnotation> {
         failOnConflictingStringAnnotation("MapName", propertyName, propertyAnnotations, parameterAnnotations, symbol)
         failOnConflictingStringAnnotation("MapWith", propertyName, propertyAnnotations, parameterAnnotations, symbol)
+        failOnConflictingStringAnnotation("MapWithFn", propertyName, propertyAnnotations, parameterAnnotations, symbol)
         return propertyAnnotations + parameterAnnotations
     }
 

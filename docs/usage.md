@@ -1,17 +1,19 @@
 # Usage Guide
 
-AutoMap exposes five annotations:
+AutoMap exposes these user-facing annotations:
 
 | Annotation | Target | Purpose |
 |------------|--------|---------|
 | `@AutoMap` | class | Declares a `Source -> Target` mapper pair. |
 | `@Flatten` | property / value parameter | Marks a composite source property for auto-flatten lookup. |
-| `@MapName` | property / value parameter | Matches a source property to a differently named target parameter. |
+| `@MapName` | property / value parameter | Matches this property to a differently named property on the opposite side. |
 | `@MapIgnore` | property / value parameter | Skips a source property when the target has a default value. |
 | `@MapWith` | property / value parameter | Uses custom conversion logic for a single property. |
+| `@MapWithFn` | property / value parameter | Calls a named converter function for a single property. |
 
 For every mapping pair, the processor emits `<Source>To<Target>Mapper.kt` in the source package.
-Generated functions are public extension functions.
+Generated functions are `public` by default, or `internal` when automatic visibility detects an
+internal source/target type or when visibility is configured explicitly.
 
 ## Mapping Model
 
@@ -66,10 +68,11 @@ name.
 
 Resolution order for a basic field:
 
-1. source property with `@MapName` matching the target parameter;
-2. source property with the same name and no `@MapName`;
-3. target default value, when the target parameter cannot be resolved;
-4. compile-time error.
+1. target property with `@MapName("sourceName")`;
+2. source property with `@MapName("targetName")`;
+3. source property with the same name and no `@MapName`;
+4. target default value, when the target parameter cannot be resolved;
+5. compile-time error.
 
 ## 2. Target-Side Declaration
 
@@ -120,9 +123,9 @@ public fun UserDto.toUser(): User = User(id = id, name = name)
 public fun List<UserDto>.toUserList(): List<User> = map { it.toUser() }
 ```
 
-Bidirectional mapping is intentionally strict. `@MapWith`, `@MapName`, `@MapIgnore`, and other
-asymmetric mapping annotations are rejected because AutoMap cannot prove the reverse mapping is
-correct.
+Bidirectional mapping is intentionally strict. `@MapWithFn`, `@MapWith`, `@MapName`, `@MapIgnore`,
+and other asymmetric mapping annotations are rejected because AutoMap cannot prove the reverse
+mapping is correct.
 
 Target-side bidirectional declaration works as well:
 
@@ -136,7 +139,9 @@ data class UserDto(val id: Long, val name: String)
 ## 4. Renamed Fields
 
 Use `@MapName` when a source property and target constructor parameter represent the same value but
-use different names:
+use different names. The value always names the matching property on the opposite side.
+
+Source-side style:
 
 ```kotlin
 @AutoMap(target = ContactDto::class)
@@ -159,6 +164,36 @@ public fun Contact.toContactDto(): ContactDto = ContactDto(
     displayName = fullName,
 )
 ```
+
+Target-side style:
+
+```kotlin
+data class BodyPart(
+    val name: String,
+    val isActive: Boolean,
+)
+
+@AutoMap(source = BodyPart::class)
+data class BodyPartDto(
+    val name: String = "",
+    @MapName("isActive") val active: Boolean = false,
+)
+```
+
+Generated:
+
+```kotlin
+public fun BodyPart.toBodyPartDto(): BodyPartDto = BodyPartDto(
+    name = name,
+    active = isActive,
+)
+```
+
+For clean architecture, prefer target-side declarations on DTO or data-layer classes using
+`@AutoMap(source = Domain::class)`. This keeps domain models free from DTO imports.
+
+If both source-side and target-side `@MapName` annotations are present, they must describe the same
+source-target pair. Otherwise AutoMap reports a compile-time conflict.
 
 ## 5. Ignored Fields
 
@@ -189,12 +224,13 @@ If the target parameter has no default, AutoMap reports a compile-time error.
 
 ## 6. Custom Conversion
 
-Use `@MapWith` when source and target field types do not match or when a field needs explicit
-conversion.
+Use `@MapWithFn` or `@MapWith` when source and target field types do not match or when a field
+needs explicit conversion.
 
 ### Function Converter
 
-Pass a function name when the conversion is stateless and should be known at compile time. AutoMap
+Kotlin annotations cannot accept arbitrary `::function` references, so AutoMap provides
+`@MapWithFn("functionName")` for stateless converter functions known at compile time. AutoMap
 supports same-package top-level functions, fully qualified top-level functions, and object function
 references:
 
@@ -202,7 +238,7 @@ references:
 @AutoMap(target = ProductDto::class)
 data class Product(
     val id: Long,
-    @MapWith("centsToDollars") val priceInCents: Long,
+    @MapWithFn("centsToDollars") val priceInCents: Long,
 )
 
 fun centsToDollars(value: Long): String =
@@ -223,9 +259,12 @@ public fun Product.toProductDto(): ProductDto = ProductDto(
 )
 ```
 
-Use `@MapWith(fn = "com.example.mapping.centsToDollars")` when an explicit argument name reads
-better. Converter functions must accept exactly one parameter compatible with the source field and
-return a type compatible with the target field.
+Use `@MapWithFn("com.example.mapping.centsToDollars")` for fully qualified references. Converter
+functions must accept exactly one parameter compatible with the source field and return a type
+compatible with the target field.
+
+The legacy string form `@MapWith("centsToDollars")` still works for compatibility. Prefer
+`@MapWithFn` for new code. Empty `@MapWith` remains the lambda-parameter API.
 
 ### Lambda Parameter
 
@@ -354,7 +393,7 @@ AutoMap applies a small set of safe built-in conversions:
 Nullable primitive widening works when the target is nullable, for example `Int? -> Long?`
 generates `value?.toLong()`. AutoMap does not perform narrowing conversions such as `Long -> Int`,
 `Double -> Float`, or `String -> Int`. It also does not convert arbitrary objects or collections to
-`String` implicitly. For those cases, add `@MapWith`.
+`String` implicitly. For those cases, add `@MapWithFn` or a lambda `@MapWith`.
 
 ## 10. Auto-flatten Mapping
 
@@ -415,28 +454,29 @@ Conflict behavior is strict. If a top-level source field and a flattened field b
 parameter, AutoMap reports an ambiguous mapping instead of choosing silently. If multiple flattened
 paths match, AutoMap reports all candidates.
 
-Use `@MapName("targetName")` on the exact top-level source property when you need to resolve a
-flatten conflict explicitly.
+Use source-side `@MapName("targetName")` or target-side `@MapName("sourceName")` when you need to
+resolve a flatten conflict explicitly.
 
 Troubleshooting:
 
 - If AutoMap reports multiple flattened candidates, disable global `flatten = true` and use
   `@Flatten` only on the intended property.
-- If a top-level and flattened field conflict, add `@MapName` to the top-level source property you
-  want or remove flattening from that mapping.
-- `@MapWith` is supported on top-level source properties. For custom conversion of a nested field,
-  expose a top-level property annotated with `@MapWith` or map that case manually.
+- If a top-level and flattened field conflict, add `@MapName` to the exact source or target
+  property you want or remove flattening from that mapping.
+- `@MapWithFn` and lambda `@MapWith` are supported on top-level source properties. For custom
+  conversion of a nested field, expose a top-level property annotated with a converter or map that
+  case manually.
 
 ## 11. Resolution Rules
 
 For each target constructor parameter, AutoMap chooses the first matching strategy:
 
-1. explicit inverse rename for generated reverse mappings;
+1. target property annotated with `@MapName("sourceName")`;
 2. source property annotated with `@MapName("targetName")`;
 3. source property with the same name, unless flattening creates an ambiguity;
 4. flattened property path when `flatten = true` or `@Flatten` enables lookup;
 5. `@MapIgnore`, if the target parameter has a default value;
-6. `@MapWith("functionName")` function converter;
+6. `@MapWithFn("functionName")` or legacy `@MapWith("functionName")` function converter;
 7. `@MapWith` lambda converter;
 8. exact type match, including generic arguments and nullability;
 9. built-in primitive conversion;
@@ -453,13 +493,13 @@ error and lists source candidates.
 Exact type matching includes nullability. A nullable source value is not automatically passed into a
 non-null target parameter.
 
-Use `@MapWith` for null handling:
+Use `@MapWithFn` or lambda `@MapWith` for null handling:
 
 ```kotlin
 fun displayName(value: String?): String = value ?: "Anonymous"
 
 @AutoMap(target = UserDto::class)
-data class User(@MapWith("displayName") val name: String?)
+data class User(@MapWithFn("displayName") val name: String?)
 
 data class UserDto(val name: String)
 ```
@@ -498,8 +538,8 @@ Source candidates:
   - fullName: kotlin.String
 
 Fix:
-  1. Add @MapName("displayName") on the matching source property
-  2. Use @MapWith for custom mapping
+  1. Add @MapName on the matching source or target property
+  2. Use @MapWithFn for custom mapping
   3. Change target type to match source
 ```
 
@@ -512,7 +552,7 @@ Source property 'passwordHash' is @MapIgnore but target param 'passwordHash' has
 Unsupported bidirectional mapping:
 
 ```text
-@AutoMap(bidirectional = true) cannot be used because field 'priceInCents' has @MapWith / @MapIgnore which has no automatic inverse.
+@AutoMap(bidirectional = true) cannot be used because field 'priceInCents' has @MapWithFn / @MapWith / @MapIgnore which has no automatic inverse.
 ```
 
 Flatten conflict:
@@ -525,7 +565,7 @@ Multiple candidates found:
 - user.id: kotlin.Int
 
 Fix:
-1. Add @MapName("id") to the correct source property
+1. Add @MapName to the correct source or target property
 2. Disable flatten = true and use @Flatten only on the intended property
 3. Rename one of the fields
 ```
@@ -610,8 +650,9 @@ that are visible from that generated file.
 
 ### Can AutoMap map multiple source fields into one target field?
 
-Not automatically. Use `@MapWith` when one source property can be converted into the target value,
-or write a manual mapper when the value depends on multiple source properties.
+Not automatically. Use `@MapWithFn` or lambda `@MapWith` when one source property can be converted
+into the target value, or write a manual mapper when the value depends on multiple source
+properties.
 
 ### Can AutoMap map sealed classes or polymorphic hierarchies?
 

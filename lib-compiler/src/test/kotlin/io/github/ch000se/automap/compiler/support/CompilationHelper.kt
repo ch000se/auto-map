@@ -7,14 +7,20 @@ import com.tschuchort.compiletesting.SourceFile
 import com.tschuchort.compiletesting.configureKsp
 import com.tschuchort.compiletesting.kspProcessorOptions
 import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
+import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 
 object CompilationHelper {
 
-    fun compile(vararg sources: SourceFile, options: Map<String, String> = emptyMap()): JvmCompilationResult {
+    fun compile(
+        vararg sources: SourceFile,
+        options: Map<String, String> = emptyMap(),
+        classpaths: List<File> = emptyList(),
+    ): JvmCompilationResult {
         return KotlinCompilation().apply {
             this.sources = sources.toList()
+            this.classpaths = classpaths
             configureKsp {
                 symbolProcessorProviders += AutoMapSymbolProcessorProvider()
             }

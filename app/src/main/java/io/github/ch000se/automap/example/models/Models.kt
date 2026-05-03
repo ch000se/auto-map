@@ -5,6 +5,7 @@ import io.github.ch000se.automap.annotations.Flatten
 import io.github.ch000se.automap.annotations.MapIgnore
 import io.github.ch000se.automap.annotations.MapName
 import io.github.ch000se.automap.annotations.MapWith
+import io.github.ch000se.automap.annotations.MapWithFn
 
 private const val SAMPLE_TAX_DIVISOR = 10L
 
@@ -48,9 +49,9 @@ fun computeTax(value: Long): Long = value / SAMPLE_TAX_DIVISOR
 /**
  * Example product model used to demonstrate renamed fields and custom conversions.
  *
- * [name] is mapped to `ProductDto.title` with [MapName]. [priceInCents] uses the named
- * [computeTax] converter function, while [displayPrice] uses a generated lambda parameter supplied by the
- * caller.
+ * [name] is mapped to `ProductDto.title` with [MapName]. [priceInCents] uses [MapWithFn] to call
+ * the named [computeTax] converter function, while [displayPrice] uses a generated lambda
+ * parameter supplied by the caller.
  *
  * @property id Stable product identifier.
  * @property name Product name mapped into `ProductDto.title`.
@@ -61,7 +62,7 @@ fun computeTax(value: Long): Long = value / SAMPLE_TAX_DIVISOR
 data class Product(
     val id: Long,
     @property:MapName("title") val name: String,
-    @property:MapWith("computeTax") val priceInCents: Long,
+    @property:MapWithFn("computeTax") val priceInCents: Long,
     @property:MapWith val displayPrice: Long,
 )
 
